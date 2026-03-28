@@ -77,7 +77,7 @@ export interface WorkflowStep {
   event_name?: string;
   prompt?: string;
   transitions?: Transition[];
-  result?: string;
+  result?: unknown;
 }
 
 export interface Transition {

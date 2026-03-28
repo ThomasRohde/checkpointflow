@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   ReactFlow,
@@ -204,12 +204,16 @@ function StepDetailPanel({
             <JsonView data={step.transitions} />
           </div>
         )}
-        {step.result && (
+        {step.result !== undefined && step.result !== null && (
           <div>
             <span className="text-xs text-zinc-400">Result</span>
-            <div className="font-mono text-xs text-zinc-700">
-              {step.result}
-            </div>
+            {typeof step.result === "object" ? (
+              <JsonView data={step.result} />
+            ) : (
+              <div className="font-mono text-xs text-zinc-700">
+                {String(step.result)}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -218,8 +222,8 @@ function StepDetailPanel({
 }
 
 function WorkflowGraphInner() {
-  const { path } = useParams<{ path: string }>();
-  const decodedPath = path ? decodeURIComponent(path) : "";
+  const [searchParams] = useSearchParams();
+  const decodedPath = searchParams.get("path") ?? "";
 
   const {
     data: workflow,

@@ -167,7 +167,7 @@ export function WorkflowsList() {
                     key={wf.path}
                     onClick={() =>
                       navigate(
-                        `/workflows/${encodeURIComponent(wf.path)}`
+                        `/workflows/view?path=${encodeURIComponent(wf.path)}`
                       )
                     }
                     className="w-full flex items-center gap-3 px-4 py-3 bg-white rounded-lg border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all text-left group"

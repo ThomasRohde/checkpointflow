@@ -64,7 +64,7 @@ export default function App() {
           <Route path="/" element={<RunsList />} />
           <Route path="/runs/:id" element={<RunDetail />} />
           <Route path="/workflows" element={<WorkflowsList />} />
-          <Route path="/workflows/:path" element={<WorkflowGraph />} />
+          <Route path="/workflows/view" element={<WorkflowGraph />} />
         </Routes>
       </main>
     </div>

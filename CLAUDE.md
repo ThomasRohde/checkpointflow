@@ -32,6 +32,22 @@ uv build                     # Build distribution
 - mypy strict mode with `pydantic.mypy` plugin — all code must pass strict type checking.
 - Ruff lint rules: B, E, F, I, PTH, RET, RUF, SIM, UP.
 
+## Release Procedure
+
+After every successful commit and push, reinstall the global tool:
+```bash
+uv tool install -e . --force
+```
+
+To cut a release:
+1. Bump `version` in `pyproject.toml`
+2. Run `uv lock` to update the lockfile
+3. Commit: `git add pyproject.toml uv.lock && git commit -m "Bump version to X.Y.Z"`
+4. Tag: `git tag vX.Y.Z`
+5. Push: `git push origin master --tags`
+6. The `release.yml` workflow runs CI, builds the wheel, and creates a GitHub Release with artifacts
+7. Reinstall locally: `uv tool install -e . --force`
+
 ## Project Context
 
 - CLI entry point: `cpf` (defined in `src/checkpointflow/cli.py`).
