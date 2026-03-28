@@ -1,9 +1,55 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Activity, Loader2 } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Loader2, Search } from "lucide-react";
 import { api } from "../lib/api";
+import type { RunSummary } from "../lib/types";
 import { StatusBadge } from "./StatusBadge";
 import { timeAgo } from "../lib/utils";
+
+type SortKey = "workflow_id" | "status" | "current_step_id" | "created_at" | "updated_at";
+type SortDir = "asc" | "desc";
+
+function comparator(key: SortKey, dir: SortDir) {
+  return (a: RunSummary, b: RunSummary) => {
+    const va = a[key] ?? "";
+    const vb = b[key] ?? "";
+    const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    return dir === "asc" ? cmp : -cmp;
+  };
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeKey: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === activeKey;
+  return (
+    <th
+      className="text-left px-4 py-3 font-medium text-zinc-500 cursor-pointer select-none hover:text-zinc-700 transition-colors"
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active &&
+          (dir === "asc" ? (
+            <ArrowUp className="w-3 h-3" />
+          ) : (
+            <ArrowDown className="w-3 h-3" />
+          ))}
+      </span>
+    </th>
+  );
+}
 
 export function RunsList() {
   const navigate = useNavigate();
@@ -13,11 +59,54 @@ export function RunsList() {
     staleTime: 30_000,
   });
 
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("created_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "created_at" || key === "updated_at" ? "desc" : "asc");
+    }
+  };
+
+  const filtered = useMemo(() => {
+    if (!runs) return [];
+    const q = search.toLowerCase().trim();
+    let result = runs;
+    if (q) {
+      result = runs.filter(
+        (r) =>
+          r.workflow_id.toLowerCase().includes(q) ||
+          r.run_id.toLowerCase().includes(q) ||
+          r.status.toLowerCase().includes(q) ||
+          (r.current_step_id ?? "").toLowerCase().includes(q)
+      );
+    }
+    return [...result].sort(comparator(sortKey, sortDir));
+  }, [runs, search, sortKey, sortDir]);
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
-        <Activity className="w-5 h-5 text-zinc-400" />
-        <h1 className="text-lg font-semibold text-zinc-900">Runs</h1>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <Activity className="w-5 h-5 text-zinc-400" />
+          <h1 className="text-lg font-semibold text-zinc-900">Runs</h1>
+        </div>
+        {runs && runs.length > 0 && (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+            <input
+              type="text"
+              placeholder="Search runs..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 pr-3 py-1.5 text-sm rounded-lg border border-zinc-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-300 w-64 transition-colors"
+            />
+          </div>
+        )}
       </div>
 
       {isLoading && (
@@ -39,30 +128,27 @@ export function RunsList() {
         </div>
       )}
 
-      {runs && runs.length > 0 && (
+      {runs && runs.length > 0 && filtered.length === 0 && (
+        <div className="text-center py-20 text-zinc-400">
+          <Search className="w-10 h-10 mx-auto mb-3 opacity-40" />
+          <p className="text-sm">No runs match "{search}"</p>
+        </div>
+      )}
+
+      {filtered.length > 0 && (
         <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-100 bg-zinc-50/50">
-                <th className="text-left px-4 py-3 font-medium text-zinc-500">
-                  Workflow
-                </th>
-                <th className="text-left px-4 py-3 font-medium text-zinc-500">
-                  Status
-                </th>
-                <th className="text-left px-4 py-3 font-medium text-zinc-500">
-                  Current Step
-                </th>
-                <th className="text-left px-4 py-3 font-medium text-zinc-500">
-                  Created
-                </th>
-                <th className="text-left px-4 py-3 font-medium text-zinc-500">
-                  Updated
-                </th>
+                <SortHeader label="Workflow" sortKey="workflow_id" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortHeader label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortHeader label="Current Step" sortKey="current_step_id" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortHeader label="Created" sortKey="created_at" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortHeader label="Updated" sortKey="updated_at" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>
-              {runs.map((run) => (
+              {filtered.map((run) => (
                 <tr
                   key={run.run_id}
                   onClick={() => navigate(`/runs/${run.run_id}`)}

@@ -33,7 +33,7 @@ Most agent workflows break down in the same places:
 ## What You Get
 
 - A narrow, predictable runtime contract that is easy for agents to drive.
-- Stable CLI commands for validate, run, resume, inspect, status, logs, cancel, and guide.
+- Stable CLI commands for validate, run, resume, inspect, status, cancel, guide, and gui.
 - Explicit pause/resume semantics instead of hidden conversational continuation.
 - Deterministic control flow driven by persisted inputs and step outputs.
 - A default user-scoped state store at `~/.checkpointflow/`.
@@ -164,6 +164,7 @@ If the workflow reaches a wait point, `checkpointflow` exits with code `40` and 
   "run_id": "01JQEXAMPLE00000000000002",
   "current_step_id": "approval",
   "wait": {
+    "kind": "external_event",
     "audience": "user",
     "event_name": "change_approval",
     "prompt": "Review the proposed page update and approve or reject it.",
@@ -180,6 +181,11 @@ If the workflow reaches a wait point, `checkpointflow` exits with code `40` and 
         }
       }
     },
+    "instructions": [
+      "Ask the intended audience for input using the prompt.",
+      "Collect JSON that matches input_schema.",
+      "Resume with the provided run_id and event_name."
+    ],
     "resume": {
       "command": "cpf resume --run-id 01JQEXAMPLE00000000000002 --event change_approval --input @response.json"
     }
@@ -237,8 +243,8 @@ cpf run -f workflow.yaml --input @input.json
 cpf resume --run-id <run_id> --event <event_name> --input @event.json
 cpf status --run-id <run_id>
 cpf inspect --run-id <run_id>
-cpf logs --run-id <run_id>
 cpf cancel --run-id <run_id> --reason "..."
+cpf gui
 ```
 
 ## Workflow Model

@@ -62,6 +62,7 @@ Optional fields:
 - `cwd` — working directory for the command. Supports `${inputs.x}` interpolation. If omitted, runs in the directory where `cpf` was invoked.
 - `shell` — shell to use. Supported values: `bash`, `sh`, `powershell`, `pwsh`, `cmd`. Default: system shell. Can also be set at the workflow level via `defaults.shell`.
 - `outputs` — JSON Schema for expected stdout JSON. If defined, stdout must be valid JSON matching this schema or the step fails.
+- `success` — custom success criteria. `exit_codes` is a list of integers treated as success (default: `[0]`).
 - `timeout_seconds` — kill the process after this many seconds
 - `retry` — retry configuration with `max_attempts`, `backoff_seconds`, `strategy` (`fixed` or `exponential`). Note: retry is accepted by the schema but not yet enforced by the runtime.
 - `if` — expression that must evaluate to true for the step to run (e.g., `inputs.mode == "full"`)
@@ -89,6 +90,7 @@ Optional fields:
 - `prompt` — human-readable description of what input is needed (included in the waiting envelope when present)
 - `summary` — short summary for display
 - `transitions` — list of `{when, next}` rules evaluated against the event data on resume. If transitions are defined, the first matching `when` condition determines which step to jump to. If no transitions are defined, execution continues to the next step in the array.
+- `on_timeout` — object with a `next` field specifying which step to jump to if the step times out
 
 ```yaml
 - id: approval
@@ -147,6 +149,7 @@ All step kinds accept these optional fields:
 - `timeout_seconds` — maximum execution time
 - `risk_level` — `low`, `medium`, or `high`
 - `retry` — `{max_attempts, backoff_seconds, strategy}`
+- `inputs` — step-level input mapping (used by subflow steps)
 - `outputs` — JSON Schema for step output validation
 - `tags` — list of string tags
 
@@ -190,6 +193,7 @@ cpf resume --run-id <run_id> --event <event_name> --input @event.json
 cpf status --run-id <run_id>
 cpf inspect --run-id <run_id>
 cpf cancel --run-id <run_id> --reason "..."
+cpf gui                                               # launch the web dashboard
 ```
 
 The `--input` flag accepts either inline JSON or `@path/to/file.json` (reads from file).
@@ -293,6 +297,7 @@ Exit code 40 means "waiting for input" — it is not a failure.
 | 40 | Waiting for external event (not a failure) |
 | 50 | Cancelled |
 | 60 | Persistence error |
+| 70 | Concurrency or lock error |
 | 80 | Unsupported feature (step kind not yet implemented) |
 | 90 | Internal error |
 
