@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+import pytest
 
 from checkpointflow.engine.queries import query_inspect
 from checkpointflow.engine.runner import run_workflow
@@ -13,6 +16,7 @@ from checkpointflow.models.workflow import EndStep
 # --- Fix 1: Shell selection ---
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell test requires Windows")
 def test_cli_step_powershell_shell(tmp_path: Path) -> None:
     """shell: powershell should run PowerShell commands."""
     wf = tmp_path / "workflow.yaml"
