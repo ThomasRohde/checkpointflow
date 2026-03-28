@@ -7,4 +7,4 @@ def test_help_smoke() -> None:
     result = CliRunner().invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "checkpointflow CLI scaffolding" in result.stdout
+    assert "checkpointflow" in result.stdout

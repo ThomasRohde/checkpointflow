@@ -1,0 +1,52 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: agent_decision
+  name: Agent Decision
+  version: 0.1.0
+  description: An agent analyzes data and a human reviews the recommendation.
+
+  inputs:
+    type: object
+    required: [data_source]
+    properties:
+      data_source:
+        type: string
+
+  steps:
+    - id: analyze
+      kind: cli
+      command: echo "Analyzing ${inputs.data_source}"
+
+    - id: review
+      kind: await_event
+      audience: user
+      event_name: review_decision
+      prompt: Review the analysis and approve or request changes.
+      input_schema:
+        type: object
+        required: [action]
+        properties:
+          action:
+            type: string
+            enum: [approve, revise]
+          notes:
+            type: string
+      transitions:
+        - when: ${event.action == "approve"}
+          next: apply
+        - when: ${event.action == "revise"}
+          next: revision_needed
+
+    - id: apply
+      kind: cli
+      command: echo "Applying approved changes"
+
+    - id: complete
+      kind: end
+      result:
+        outcome: applied
+
+    - id: revision_needed
+      kind: end
+      result:
+        outcome: needs_revision

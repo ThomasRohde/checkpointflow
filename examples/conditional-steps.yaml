@@ -1,0 +1,29 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: conditional_steps
+  name: Conditional Steps
+  version: 0.1.0
+  description: Demonstrates step-level if conditions to skip steps based on inputs.
+
+  inputs:
+    type: object
+    required: [mode]
+    properties:
+      mode:
+        type: string
+        description: Either "quick" or "full"
+
+  steps:
+    - id: setup
+      kind: cli
+      command: echo "Setting up in ${inputs.mode} mode"
+
+    - id: full_scan
+      kind: cli
+      command: echo "Running full scan"
+      if: inputs.mode == "full"
+
+    - id: done
+      kind: end
+      result:
+        mode: ${inputs.mode}

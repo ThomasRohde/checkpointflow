@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from checkpointflow.cli import app
+
+runner = CliRunner()
+
+
+def _write_workflow(tmp_path: Path, steps_yaml: str) -> Path:
+    wf = tmp_path / "workflow.yaml"
+    wf.write_text(f"""\
+schema_version: checkpointflow/v1
+workflow:
+  id: test_wf
+  version: "1.0"
+  inputs:
+    type: object
+  steps:
+{steps_yaml}
+""")
+    return wf
+
+
+def test_run_help_shows_options() -> None:
+    result = runner.invoke(app, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--file" in result.stdout
+    assert "--input" in result.stdout
+
+
+def test_run_valid_workflow_exits_zero(tmp_path: Path) -> None:
+    wf = _write_workflow(
+        tmp_path,
+        """\
+    - id: done
+      kind: end""",
+    )
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(wf), "--input", "{}"],
+        env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
+    )
+    assert result.exit_code == 0
+
+
+def test_run_returns_json_envelope(tmp_path: Path) -> None:
+    wf = _write_workflow(
+        tmp_path,
+        """\
+    - id: done
+      kind: end""",
+    )
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(wf), "--input", "{}"],
+        env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
+    )
+    envelope = json.loads(result.stdout)
+    assert envelope["ok"] is True
+    assert envelope["command"] == "run"
+    assert envelope["status"] == "completed"
+
+
+def test_run_envelope_has_run_id(tmp_path: Path) -> None:
+    wf = _write_workflow(
+        tmp_path,
+        """\
+    - id: done
+      kind: end""",
+    )
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(wf), "--input", "{}"],
+        env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
+    )
+    envelope = json.loads(result.stdout)
+    assert "run_id" in envelope
+    assert len(envelope["run_id"]) > 0
+
+
+def test_run_envelope_has_workflow_id(tmp_path: Path) -> None:
+    wf = _write_workflow(
+        tmp_path,
+        """\
+    - id: done
+      kind: end""",
+    )
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(wf), "--input", "{}"],
+        env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
+    )
+    envelope = json.loads(result.stdout)
+    assert envelope["workflow_id"] == "test_wf"
+
+
+def test_run_nonexistent_file_exits_ten(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(tmp_path / "nope.yaml"), "--input", "{}"],
+    )
+    assert result.exit_code == 10
+
+
+def test_run_invalid_input_exits_ten(tmp_path: Path) -> None:
+    wf = _write_workflow(
+        tmp_path,
+        """\
+    - id: done
+      kind: end""",
+    )
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(wf), "--input", "{bad"],
+        env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
+    )
+    assert result.exit_code == 10
+
+
+def test_run_step_failure_exits_thirty(tmp_path: Path) -> None:
+    wf = _write_workflow(
+        tmp_path,
+        """\
+    - id: fail
+      kind: cli
+      command: exit 1
+    - id: done
+      kind: end""",
+    )
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(wf), "--input", "{}"],
+        env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
+    )
+    assert result.exit_code == 30
+
+
+def test_run_unsupported_step_exits_eighty(tmp_path: Path) -> None:
+    wf = tmp_path / "workflow.yaml"
+    wf.write_text("""\
+schema_version: checkpointflow/v1
+workflow:
+  id: test_wf
+  inputs:
+    type: object
+  steps:
+    - id: call_api
+      kind: api
+      method: GET
+      url: https://example.com
+    - id: done
+      kind: end
+""")
+    result = runner.invoke(
+        app,
+        ["run", "-f", str(wf), "--input", "{}"],
+        env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
+    )
+    assert result.exit_code == 80

@@ -1,0 +1,23 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: simple_echo
+  name: Simple Echo
+  version: 0.1.0
+  description: A minimal workflow that echoes a greeting and completes.
+
+  inputs:
+    type: object
+    required: [name]
+    properties:
+      name:
+        type: string
+
+  steps:
+    - id: greet
+      kind: cli
+      command: echo "Hello, ${inputs.name}!"
+
+    - id: done
+      kind: end
+      result:
+        status: completed

@@ -1,0 +1,533 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/checkpointflow.schema.json",
+  "title": "checkpointflow workflow document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "workflow"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "checkpointflow/v1"
+    },
+    "workflow": {
+      "$ref": "#/$defs/workflow"
+    }
+  },
+  "$defs": {
+    "jsonSchemaLike": {
+      "type": "object"
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backoff_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "fixed",
+            "exponential"
+          ]
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exit_codes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "status_codes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "when",
+        "next"
+      ],
+      "properties": {
+        "when": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        }
+      }
+    },
+    "baseStep": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "if": {
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "risk_level": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "retry": {
+          "$ref": "#/$defs/retry"
+        },
+        "outputs": {
+          "$ref": "#/$defs/jsonSchemaLike"
+        },
+        "inputs": {
+          "type": "object"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cliStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "command"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "cli"
+            },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            },
+            "shell": {
+              "type": "string"
+            },
+            "success": {
+              "$ref": "#/$defs/success"
+            }
+          }
+        }
+      ]
+    },
+    "apiStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "method",
+            "url"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "api"
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE"
+              ]
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "headers": {
+              "type": "object"
+            },
+            "body": {},
+            "success": {
+              "$ref": "#/$defs/success"
+            }
+          }
+        }
+      ]
+    },
+    "awaitEventStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "audience",
+            "event_name",
+            "input_schema"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "await_event"
+            },
+            "audience": {
+              "type": "string",
+              "enum": [
+                "user",
+                "agent",
+                "system"
+              ]
+            },
+            "event_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/jsonSchemaLike"
+            },
+            "transitions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/transition"
+              }
+            },
+            "on_timeout": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "next": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "workflowStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "workflow_ref"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "workflow"
+            },
+            "workflow_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "inputs": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "switchStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "cases"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "switch"
+            },
+            "cases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/transition"
+              },
+              "minItems": 1
+            },
+            "default": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "foreachStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "items"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "foreach"
+            },
+            "items": {
+              "type": "string"
+            },
+            "workflow_ref": {
+              "type": "string"
+            },
+            "body": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/step"
+              }
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "workflow_ref"
+              ]
+            },
+            {
+              "required": [
+                "body"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "parallelBranch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_at"
+      ],
+      "properties": {
+        "start_at": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "parallelStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "branches"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "parallel"
+            },
+            "branches": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/parallelBranch"
+              },
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    },
+    "endStep": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseStep"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "kind"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "end"
+            },
+            "result": {}
+          }
+        }
+      ]
+    },
+    "step": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/cliStep"
+        },
+        {
+          "$ref": "#/$defs/apiStep"
+        },
+        {
+          "$ref": "#/$defs/awaitEventStep"
+        },
+        {
+          "$ref": "#/$defs/workflowStep"
+        },
+        {
+          "$ref": "#/$defs/switchStep"
+        },
+        {
+          "$ref": "#/$defs/foreachStep"
+        },
+        {
+          "$ref": "#/$defs/parallelStep"
+        },
+        {
+          "$ref": "#/$defs/endStep"
+        }
+      ]
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "inputs",
+        "steps"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "defaults": {
+          "type": "object"
+        },
+        "inputs": {
+          "$ref": "#/$defs/jsonSchemaLike"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          },
+          "minItems": 1
+        },
+        "outputs": {
+          "$ref": "#/$defs/jsonSchemaLike"
+        }
+      }
+    }
+  }
+}
