@@ -218,6 +218,8 @@ cpf gc
 - human-readable output modes may exist, but JSON must remain authoritative
 - `LLM=true` must force strictly agent-friendly behavior
 - the CLI should work well when driven by an agent that is creating or editing workflow YAML
+- workflow files may live anywhere on disk
+- runtime state defaults to `~/.checkpointflow/`, independent of workflow location
 
 ## 8. Exit code taxonomy
 
@@ -682,20 +684,23 @@ The runtime must append a durable event record for important events such as:
 
 ## 17. Persistence model
 
-A simple file-based reference implementation is acceptable.
+A local SQLite-backed reference implementation is preferred for v1.
 
 ### Suggested layout
 
 ```text
-.runs/
-  <run_id>/
-    run.json
-    events.jsonl
-    steps/
-    artifacts/
-    stdout/
-    stderr/
+~/.checkpointflow/
+  runs.db
+  runs/
+    <run_id>/
+      artifacts/
+      stdout/
+      stderr/
 ```
+
+SQLite should hold run metadata, checkpoints, event history, and step outputs. Large process artifacts such as stdout, stderr, and file outputs should remain on disk and be referenced by path from the database.
+
+Workflow files are not coupled to the state directory. A workflow may be executed from any path; the runtime should record that source path as metadata while persisting run state under the user-scoped default state root.
 
 ### Minimum persisted data
 
@@ -709,8 +714,6 @@ A simple file-based reference implementation is acceptable.
 - checkpoints
 - timestamps
 - lock metadata if used
-
-SQLite may be added later for indexing and search.
 
 ## 18. Determinism rules
 
@@ -990,7 +993,10 @@ A first implementation should:
 
 - use YAML for workflow files
 - use JSON Schema validation
-- store runs in files or SQLite
+- use a uv-managed Python package on CPython 3.13+
+- use Typer at the CLI edge and keep the engine independent of the CLI framework
+- use Pydantic v2 for internal models and `jsonschema` for schema enforcement
+- store run state in SQLite and large artifacts on disk
 - expose exact JSON envelopes on stdout
 - keep the expression evaluator minimal
 - treat `await_event` as the primary pause primitive
@@ -1017,7 +1023,7 @@ It gives agent systems a way to externalize the reliable parts of a workflow int
 - `run`, `resume`, `status`, `validate`, `guide`
 - `cli`, `await_event`, `end`
 - JSON envelopes
-- file-based persistence
+- SQLite-backed local persistence
 
 ### Phase 2
 
@@ -1033,7 +1039,6 @@ It gives agent systems a way to externalize the reliable parts of a workflow int
 - `api`
 - `foreach`
 - `parallel`
-- SQLite index
 - visualization / TUI support
 
 ## 32. Final recommendation

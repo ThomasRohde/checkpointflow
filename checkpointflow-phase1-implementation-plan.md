@@ -16,7 +16,7 @@ The first release should support:
 - pausing on `await_event`
 - resuming from persisted state
 - returning stable JSON envelopes
-- file-based persistence
+- local durable persistence
 - deterministic control flow with a very small expression model
 - a minimal authoring surface through `guide`, schema docs, and examples
 
@@ -36,7 +36,7 @@ The first release should support:
 - `await_event` step
 - `end` step
 - minimal transition handling
-- file-based state store
+- SQLite-backed local state store
 - JSON Schema validation
 - structured error model
 - stable exit codes
@@ -54,45 +54,69 @@ The first release should support:
 - TUI
 - remote execution
 
-## Suggested implementation stack
+## Finalized implementation stack
 
-- Python 3.12+
-- `pydantic` for runtime models
-- `jsonschema` for workflow/input/event validation
-- `PyYAML` or `ruamel.yaml` for parsing
+- CPython 3.13+ with `.python-version` pinned to 3.14 for day-to-day development
+- `uv` for dependency management, locking, virtualenv management, build, and publish
+- `uv_build` as the package build backend
+- Typer for the CLI surface and Rich for human-oriented rendering
+- `pydantic` v2 for runtime models, envelopes, and persisted records
+- `jsonschema` for workflow, input, and event validation against the bundled schemas
+- `PyYAML` with safe loaders for workflow parsing
 - standard library `subprocess` for `cli` steps
-- file-based run store under `.runs/`
+- standard library `sqlite3` for run metadata, checkpoints, and event history
+- filesystem artifact directories under `~/.checkpointflow/runs/<run_id>/`
+- Ruff, mypy, pytest, and pytest-cov as the required quality toolchain
+
+## Development method
+
+Phase 1 should be built with strict TDD:
+
+- write the failing test first
+- implement the smallest change that makes it pass
+- refactor only with a green test suite
+- add regression tests for every bug before fixing it
+
+The preferred order is unit test first, then CLI or end-to-end coverage when the behavior boundary is stable.
 
 ## Repository structure
 
 ```text
-checkpointflow/
-  cli.py
-  engine/
-    runner.py
-    resume.py
-    evaluator.py
-    state.py
-    steps/
-      cli_step.py
-      await_event_step.py
-      end_step.py
-  models/
-    envelope.py
-    workflow.py
-    state.py
-    errors.py
-  schemas/
-    checkpointflow.schema.json
-    checkpointflow-run-envelope.schema.json
-  guide/
-    guide.md
-  tests/
+src/
+  checkpointflow/
+    __init__.py
+    cli.py
+    __main__.py
+    engine/
+      runner.py
+      resume.py
+      evaluator.py
+      steps/
+        cli_step.py
+        await_event_step.py
+        end_step.py
+    models/
+      envelope.py
+      workflow.py
+      state.py
+      errors.py
+    persistence/
+      db.py
+      queries.py
+      artifacts.py
+    py.typed
+schemas/
+  checkpointflow.schema.json
+  checkpointflow-run-envelope.schema.json
+tests/
 pyproject.toml
+uv.lock
 ```
 
 The package should expose `cpf` as the primary console script.
 It should be framed as a local toolchain for authoring, validating, and executing checkpointflows.
+
+Workflow files are path-agnostic and may live anywhere. Runtime state should default to a user-scoped home-directory location instead of a directory relative to the workflow file.
 
 ## Core runtime flow
 
@@ -133,18 +157,27 @@ It should be framed as a local toolchain for authoring, validating, and executin
 Suggested layout:
 
 ```text
-.runs/
-  <run_id>/
-    run.json
-    events.jsonl
-    steps/
-      <step_id>.json
-    artifacts/
-    stdout/
-    stderr/
+~/.checkpointflow/
+  runs.db
+  runs/
+    <run_id>/
+      artifacts/
+      stdout/
+      stderr/
 ```
 
-### `run.json`
+SQLite should be the source of truth for run metadata because `status`, `inspect`, `resume`, and future `list` or `gc` commands benefit from transactional updates and indexed queries. Large process artifacts should remain on disk, referenced from the database.
+
+The workflow path should be stored as metadata in the run record, but persistence location must not depend on where the workflow file lives.
+
+### Required tables
+
+- `runs`
+- `events`
+- `step_results`
+- `artifacts`
+
+### `runs` record
 
 Should contain:
 - `run_id`
@@ -155,8 +188,8 @@ Should contain:
 - `current_step_id`
 - `expected_event_name` when waiting
 - `expected_event_schema` when waiting
-- `inputs`
-- `step_outputs`
+- `inputs_json`
+- `step_outputs_json`
 - `created_at`
 - `updated_at`
 
@@ -215,6 +248,8 @@ Output:
 
 ## Testing strategy
 
+The test loop for every milestone should be red, green, refactor.
+
 ### Unit tests
 
 - workflow parsing
@@ -237,6 +272,13 @@ Recommended first fixtures:
 - docs publish workflow with human approval
 - repo task with an agent decision step and later resume
 - mixed human-agent workflow generated from a conversation transcript
+
+### TDD execution rules
+
+- Start each milestone by naming the next externally visible behavior and writing the failing test for it.
+- Keep tests focused on stable contracts such as envelopes, exit codes, and persisted state transitions.
+- When a bug is found, first capture it as a regression test at the narrowest useful level.
+- Do not merge behavior that only exists in manual testing.
 
 ## First-class invariants
 
@@ -268,23 +310,26 @@ Do not solve these in phase 1.
 - workflow schema
 - envelope schema
 - `cpf validate`
+- tests first for schema loading, validation success, and validation failure envelopes
 
 ### Milestone 2
 - `cpf run`
 - `cli`
 - `end`
-- file state store
+- SQLite persistence layer
+- tests first for run creation, step execution, and completed envelopes
 
 ### Milestone 3
 - `await_event`
 - `cpf resume`
 - `cpf status`
 - `cpf inspect`
+- tests first for waiting envelopes, resume validation, and status queries
 
 ### Milestone 4
-- tests
 - `cpf guide`
 - example workflows
+- close remaining coverage gaps and add regression tests from implementation learnings
 
 ## Acceptance criteria
 

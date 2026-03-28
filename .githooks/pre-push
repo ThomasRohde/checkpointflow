@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+
+. "$(dirname "$0")/_lib.sh"
+
+run_step "Running test suite" uv run pytest
+run_step "Building distributions" uv build
+run_step "Smoke testing built wheel" uv tool run --isolated --from ./dist/*.whl cpf --help

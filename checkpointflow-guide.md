@@ -34,6 +34,10 @@ A common loop is:
 5. `cpf run` executes it and emits structured envelopes
 6. `cpf resume` continues the run when external input arrives
 
+Workflow files are location-independent. They can live anywhere on disk, and the CLI should operate on the explicit file path you pass in.
+
+Runtime state is separate from workflow location. By default, checkpointflow stores run state under `~/.checkpointflow/`.
+
 ## Workflow file
 
 Top-level structure:
@@ -194,6 +198,8 @@ cpf logs --run-id <run_id>
 cpf cancel --run-id <run_id> --reason "..."
 ```
 
+The `-f/--file` path may point anywhere. Running a workflow from `/tmp`, a repo directory, or a shared docs folder must not change where run state is persisted.
+
 ## JSON result envelope
 
 All commands return a stable JSON envelope on stdout.
@@ -219,6 +225,8 @@ When execution reaches `await_event`, the CLI:
 - persists a checkpoint
 - exits with code `40`
 - writes a waiting envelope to stdout
+
+By default, the checkpoint and run metadata are written under `~/.checkpointflow/`, not next to the workflow file.
 
 Example:
 

@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+. "$(dirname "$0")/_lib.sh"
+
+run_step "Checking uv.lock freshness" uv lock --check
+run_step "Checking formatting" uv run ruff format --check .
+run_step "Linting" uv run ruff check .
+run_step "Type checking" uv run mypy
