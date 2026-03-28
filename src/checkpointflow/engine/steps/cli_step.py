@@ -47,8 +47,8 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
             errors="replace",
         )
     except subprocess.TimeoutExpired:
-        stdout_path.write_text("")
-        stderr_path.write_text("")
+        stdout_path.write_text("", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
         return StepResult(
             success=False,
             error_code=ErrorCode.ERR_TIMEOUT,
@@ -56,8 +56,8 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
         )
 
     # Write captured output
-    stdout_path.write_text(proc.stdout)
-    stderr_path.write_text(proc.stderr)
+    stdout_path.write_text(proc.stdout, encoding="utf-8")
+    stderr_path.write_text(proc.stderr, encoding="utf-8")
 
     # Check exit code
     success_codes = step.success.exit_codes if step.success and step.success.exit_codes else [0]

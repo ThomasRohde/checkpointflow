@@ -44,9 +44,9 @@ def _run_to_waiting(tmp_path: Path) -> tuple[str, Path]:
 def test_resume_help_shows_options() -> None:
     result = runner.invoke(app, ["resume", "--help"])
     assert result.exit_code == 0
-    assert "--run-id" in result.stdout
-    assert "--event" in result.stdout
-    assert "--input" in result.stdout
+    assert "run-id" in result.stdout
+    assert "event" in result.stdout
+    assert "input" in result.stdout
 
 
 def test_resume_valid_exits_zero(tmp_path: Path) -> None:

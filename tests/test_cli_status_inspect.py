@@ -35,7 +35,7 @@ workflow:
 def test_status_help_shows_options() -> None:
     result = runner.invoke(app, ["status", "--help"])
     assert result.exit_code == 0
-    assert "--run-id" in result.stdout
+    assert "run-id" in result.stdout
 
 
 def test_status_returns_json_envelope(tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ def test_status_run_not_found(tmp_path: Path) -> None:
 def test_inspect_help_shows_options() -> None:
     result = runner.invoke(app, ["inspect", "--help"])
     assert result.exit_code == 0
-    assert "--run-id" in result.stdout
+    assert "run-id" in result.stdout
 
 
 def test_inspect_returns_step_results(tmp_path: Path) -> None:

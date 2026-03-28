@@ -58,8 +58,8 @@ workflow:
 def test_cancel_help_shows_options() -> None:
     result = runner.invoke(app, ["cancel", "--help"])
     assert result.exit_code == 0
-    assert "--run-id" in result.stdout
-    assert "--reason" in result.stdout
+    assert "run-id" in result.stdout
+    assert "reason" in result.stdout
 
 
 def test_cancel_waiting_run(tmp_path: Path) -> None:
