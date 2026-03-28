@@ -158,6 +158,9 @@
             "shell": {
               "type": "string"
             },
+            "cwd": {
+              "type": "string"
+            },
             "success": {
               "$ref": "#/$defs/success"
             }

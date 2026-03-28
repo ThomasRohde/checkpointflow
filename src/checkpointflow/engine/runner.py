@@ -117,6 +117,7 @@ def _execute_steps(
             inputs=inputs,
             step_outputs=step_outputs,
             run_dir=run_dir,
+            defaults=workflow.defaults or {},
         )
 
         # Dispatch step handler

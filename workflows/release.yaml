@@ -1,0 +1,154 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: release_checkpointflow
+  name: Release checkpointflow
+  version: 1.0.0
+  description: >
+    Dogfooding workflow that releases checkpointflow using checkpointflow.
+    Runs the quality gate, asks for the bump type, applies the version bump,
+    updates the lockfile, commits, tags, pushes, and reinstalls locally.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    required: [project_dir]
+    properties:
+      project_dir:
+        type: string
+        description: Absolute path to the checkpointflow repo root
+
+  steps:
+    - id: quality_gate
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run pytest -q
+      timeout_seconds: 300
+
+    - id: current_version
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: python scripts/get_version.py
+      outputs:
+        type: object
+        required: [version]
+        properties:
+          version:
+            type: string
+
+    - id: bump_decision
+      kind: await_event
+      audience: user
+      event_name: version_bump
+      prompt: >
+        Quality gate passed. Current version is ${steps.current_version.outputs.version}.
+        What kind of release?
+      input_schema:
+        type: object
+        required: [bump]
+        properties:
+          bump:
+            type: string
+            enum: [patch, minor, major]
+      transitions:
+        - when: ${event.bump == "patch"}
+          next: apply_bump
+        - when: ${event.bump == "minor"}
+          next: apply_bump
+        - when: ${event.bump == "major"}
+          next: confirm_major
+
+    - id: confirm_major
+      kind: await_event
+      audience: user
+      event_name: confirm_major
+      prompt: >
+        You selected a MAJOR version bump. This signals breaking changes. Are you sure?
+      input_schema:
+        type: object
+        required: [confirmed]
+        properties:
+          confirmed:
+            type: string
+            enum: ["yes", "no"]
+      transitions:
+        - when: ${event.confirmed == "yes"}
+          next: apply_bump
+        - when: ${event.confirmed == "no"}
+          next: aborted
+
+    - id: apply_bump
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: python scripts/bump_version.py ${steps.bump_decision.outputs.bump}
+      outputs:
+        type: object
+        required: [version, previous]
+        properties:
+          version:
+            type: string
+          previous:
+            type: string
+
+    - id: update_lock
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: uv lock
+
+    - id: confirm_release
+      kind: await_event
+      audience: user
+      event_name: confirm_release
+      prompt: >
+        Bumped ${steps.apply_bump.outputs.previous} -> ${steps.apply_bump.outputs.version}.
+        Commit, tag, and push?
+      input_schema:
+        type: object
+        required: [proceed]
+        properties:
+          proceed:
+            type: string
+            enum: ["yes", "no"]
+      transitions:
+        - when: ${event.proceed == "yes"}
+          next: commit_and_push
+        - when: ${event.proceed == "no"}
+          next: rollback
+
+    - id: commit_and_push
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        git add pyproject.toml uv.lock &&
+        git commit -m "Release v${steps.apply_bump.outputs.version}" &&
+        git tag v${steps.apply_bump.outputs.version} &&
+        git push origin master --tags
+      timeout_seconds: 600
+
+    - id: reinstall
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: uv tool install -e . --force
+
+    - id: released
+      kind: end
+      result:
+        status: released
+        version: ${steps.apply_bump.outputs.version}
+        previous: ${steps.apply_bump.outputs.previous}
+
+    - id: rollback
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: git checkout -- pyproject.toml && uv lock
+
+    - id: rolled_back
+      kind: end
+      result:
+        status: rolled_back
+
+    - id: aborted
+      kind: end
+      result:
+        status: aborted

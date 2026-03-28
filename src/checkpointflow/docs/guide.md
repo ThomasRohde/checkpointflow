@@ -39,10 +39,14 @@ workflow:
   id: my_workflow
   name: My workflow
   version: 0.1.0
+  defaults:
+    shell: bash
   inputs: { ... }
   steps: [ ... ]
   outputs: { ... }
 ```
+
+The optional `defaults` object sets workflow-level defaults. Currently supported: `defaults.shell` sets the shell for all CLI steps (can be overridden per step).
 
 Steps execute sequentially. Each step must have a unique `id`. If no `end` step is present, the workflow completes implicitly after the last step with no result.
 
@@ -55,15 +59,17 @@ Runs a shell command. The command string supports `${inputs.x}` and `${steps.<id
 Required fields: `id`, `kind: cli`, `command`
 
 Optional fields:
+- `cwd` — working directory for the command. Supports `${inputs.x}` interpolation. If omitted, runs in the directory where `cpf` was invoked.
+- `shell` — shell to use. Supported values: `bash`, `sh`, `powershell`, `pwsh`, `cmd`. Default: system shell. Can also be set at the workflow level via `defaults.shell`.
 - `outputs` — JSON Schema for expected stdout JSON. If defined, stdout must be valid JSON matching this schema or the step fails.
 - `timeout_seconds` — kill the process after this many seconds
-- `shell` — shell to use (default: system shell)
 - `retry` — retry configuration with `max_attempts`, `backoff_seconds`, `strategy` (`fixed` or `exponential`). Note: retry is accepted by the schema but not yet enforced by the runtime.
 - `if` — expression that must evaluate to true for the step to run (e.g., `inputs.mode == "full"`)
 
 ```yaml
 - id: plan
   kind: cli
+  cwd: ${inputs.project_dir}
   command: my-tool plan --id ${inputs.page_id} --format json
   timeout_seconds: 300
   outputs:

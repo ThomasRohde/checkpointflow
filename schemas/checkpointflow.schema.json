@@ -131,13 +131,13 @@
       }
     },
     "cliStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind",
@@ -158,6 +158,9 @@
             "shell": {
               "type": "string"
             },
+            "cwd": {
+              "type": "string"
+            },
             "success": {
               "$ref": "#/$defs/success"
             }
@@ -166,13 +169,13 @@
       ]
     },
     "apiStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind",
@@ -213,13 +216,13 @@
       ]
     },
     "awaitEventStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind",
@@ -276,13 +279,13 @@
       ]
     },
     "workflowStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind",
@@ -308,13 +311,13 @@
       ]
     },
     "switchStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind",
@@ -343,13 +346,13 @@
       ]
     },
     "foreachStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind",
@@ -405,13 +408,13 @@
       }
     },
     "parallelStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind",
@@ -437,13 +440,13 @@
       ]
     },
     "endStep": {
+      "unevaluatedProperties": false,
       "allOf": [
         {
           "$ref": "#/$defs/baseStep"
         },
         {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "id",
             "kind"

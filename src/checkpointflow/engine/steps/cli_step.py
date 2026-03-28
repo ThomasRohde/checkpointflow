@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
@@ -20,8 +21,16 @@ def _build_subprocess_args(command: str, shell: str | None) -> dict[str, Any]:
             "args": [exe, "-NoProfile", "-NonInteractive", "-Command", command],
             "shell": False,
         }
-    if shell and shell.lower() not in ("bash", "sh", "cmd", "cmd.exe"):
-        # Explicit shell: pass as executable
+    if shell and shell.lower() in ("bash", "sh"):
+        import shutil
+
+        found = shutil.which(shell.lower())
+        if found:
+            return {"args": [found, "-c", command], "shell": False}
+        # Not found — fall through to default shell
+        return {"args": command, "shell": True}
+    if shell and shell.lower() not in ("cmd", "cmd.exe"):
+        # Custom shell: pass as executable
         return {"args": command, "shell": True, "executable": shell}
     # Default: system shell
     return {"args": command, "shell": True}
@@ -44,6 +53,28 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
             error_message=f"Step '{step.id}' command interpolation failed: {exc}",
         )
 
+    # Resolve cwd if specified
+    cwd: Path | None = None
+    if step.cwd:
+        try:
+            resolved_cwd = interpolate(step.cwd, eval_ctx)
+        except EvaluatorError as exc:
+            return StepResult(
+                success=False,
+                error_code=ErrorCode.ERR_STEP_FAILED,
+                error_message=f"Step '{step.id}' cwd interpolation failed: {exc}",
+            )
+        cwd = Path(resolved_cwd)
+        if not cwd.is_dir():
+            return StepResult(
+                success=False,
+                error_code=ErrorCode.ERR_STEP_FAILED,
+                error_message=f"Step '{step.id}' cwd does not exist: {cwd}",
+            )
+
+    # Determine shell: step-level overrides workflow defaults
+    shell = step.shell or ctx.defaults.get("shell")
+
     # Determine timeout
     timeout = step.timeout_seconds if step.timeout_seconds and step.timeout_seconds > 0 else None
 
@@ -51,7 +82,7 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
     stdout_path = ctx.run_dir / "stdout" / f"{step.id}.txt"
     stderr_path = ctx.run_dir / "stderr" / f"{step.id}.txt"
 
-    shell_args = _build_subprocess_args(resolved_cmd, step.shell)
+    shell_args = _build_subprocess_args(resolved_cmd, shell)
     try:
         proc = subprocess.run(
             **shell_args,
@@ -60,6 +91,7 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
             timeout=timeout,
             encoding="utf-8",
             errors="replace",
+            cwd=cwd,
         )
     except subprocess.TimeoutExpired:
         stdout_path.write_text("", encoding="utf-8")

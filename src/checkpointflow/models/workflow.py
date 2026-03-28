@@ -52,6 +52,7 @@ class CliStep(BaseStepFields):
     kind: Literal["cli"]
     command: str
     shell: str | None = None
+    cwd: str | None = None
     success: Success | None = None
 
 

@@ -11,6 +11,7 @@ class RunContext:
     inputs: dict[str, Any]
     step_outputs: dict[str, dict[str, Any]]
     run_dir: Path
+    defaults: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
