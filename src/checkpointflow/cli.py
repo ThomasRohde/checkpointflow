@@ -307,5 +307,21 @@ def cancel(
     _emit(envelope)
 
 
+@app.command()
+def gui(
+    port: Annotated[
+        int,
+        typer.Option(help="Port to serve on."),
+    ] = 8420,
+) -> None:
+    """Launch the checkpointflow web dashboard."""
+    try:
+        from checkpointflow.gui.server import run_server
+    except ImportError:
+        typer.echo("GUI requires extra dependencies: pip install checkpointflow[gui]")
+        raise typer.Exit(code=1) from None
+    run_server(port=port, base_dir=_get_base_dir())
+
+
 def main() -> None:
     app()

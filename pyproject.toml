@@ -19,8 +19,15 @@ cpf = "checkpointflow.cli:main"
 requires = ["uv_build>=0.11.2,<0.12"]
 build-backend = "uv_build"
 
+[project.optional-dependencies]
+gui = [
+    "starlette>=0.46.0",
+    "uvicorn>=0.34.0",
+]
+
 [dependency-groups]
 dev = [
+    "checkpointflow[gui]",
     "mypy>=1.19.1",
     "pytest>=9.0.2",
     "pytest-cov>=7.1.0",
