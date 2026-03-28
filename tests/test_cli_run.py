@@ -137,7 +137,8 @@ def test_run_step_failure_exits_thirty(tmp_path: Path) -> None:
     assert result.exit_code == 30
 
 
-def test_run_unsupported_step_exits_eighty(tmp_path: Path) -> None:
+def test_run_api_step_attempts_request(tmp_path: Path) -> None:
+    """API steps are now supported. A connection error results in exit code 30 (step failed)."""
     wf = tmp_path / "workflow.yaml"
     wf.write_text("""\
 schema_version: checkpointflow/v1
@@ -149,7 +150,7 @@ workflow:
     - id: call_api
       kind: api
       method: GET
-      url: https://example.com
+      url: http://127.0.0.1:1/unreachable
     - id: done
       kind: end
 """)
@@ -158,4 +159,4 @@ workflow:
         ["run", "-f", str(wf), "--input", "{}"],
         env={"CHECKPOINTFLOW_BASE_DIR": str(tmp_path / "store")},
     )
-    assert result.exit_code == 80
+    assert result.exit_code == 30

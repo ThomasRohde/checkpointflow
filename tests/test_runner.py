@@ -191,20 +191,21 @@ def test_run_cli_failure_stops(tmp_path: Path) -> None:
     assert env.error.code == "ERR_STEP_FAILED"
 
 
-def test_run_unsupported_step(tmp_path: Path) -> None:
+def test_run_api_step_connection_failure(tmp_path: Path) -> None:
+    """API steps are now supported; a connection error results in step failure (exit 30)."""
     wf = _write_workflow(
         tmp_path,
         """\
     - id: call_api
       kind: api
       method: GET
-      url: https://example.com
+      url: http://127.0.0.1:1/unreachable
     - id: done
       kind: end""",
     )
     env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
     assert env.ok is False
-    assert env.exit_code == 80
+    assert env.exit_code == 30
 
 
 # --- Persistence ---

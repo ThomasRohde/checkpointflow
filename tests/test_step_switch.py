@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from checkpointflow.engine.steps.switch_step import execute
+from checkpointflow.models.state import RunContext
+from checkpointflow.models.workflow import SwitchStep
+
+
+def _ctx(tmp_path: Path, **kwargs: object) -> RunContext:
+    return RunContext(
+        run_id="test",
+        inputs=kwargs.get("inputs", {}),  # type: ignore[arg-type]
+        step_outputs=kwargs.get("step_outputs", {}),  # type: ignore[arg-type]
+        run_dir=tmp_path,
+    )
+
+
+def test_switch_matches_first_case(tmp_path: Path) -> None:
+    step = SwitchStep.model_validate(
+        {
+            "id": "branch",
+            "kind": "switch",
+            "cases": [
+                {"when": 'inputs.mode == "fast"', "next": "fast_path"},
+                {"when": 'inputs.mode == "slow"', "next": "slow_path"},
+            ],
+        }
+    )
+    result = execute(step, _ctx(tmp_path, inputs={"mode": "fast"}))
+    assert result.success is True
+    assert result.outputs == {"_next_step_id": "fast_path"}
+
+
+def test_switch_matches_second_case(tmp_path: Path) -> None:
+    step = SwitchStep.model_validate(
+        {
+            "id": "branch",
+            "kind": "switch",
+            "cases": [
+                {"when": 'inputs.mode == "fast"', "next": "fast_path"},
+                {"when": 'inputs.mode == "slow"', "next": "slow_path"},
+            ],
+        }
+    )
+    result = execute(step, _ctx(tmp_path, inputs={"mode": "slow"}))
+    assert result.success is True
+    assert result.outputs == {"_next_step_id": "slow_path"}
+
+
+def test_switch_uses_default_when_no_case_matches(tmp_path: Path) -> None:
+    step = SwitchStep.model_validate(
+        {
+            "id": "branch",
+            "kind": "switch",
+            "cases": [
+                {"when": 'inputs.mode == "fast"', "next": "fast_path"},
+            ],
+            "default": "fallback",
+        }
+    )
+    result = execute(step, _ctx(tmp_path, inputs={"mode": "unknown"}))
+    assert result.success is True
+    assert result.outputs == {"_next_step_id": "fallback"}
+
+
+def test_switch_fails_when_no_case_and_no_default(tmp_path: Path) -> None:
+    step = SwitchStep.model_validate(
+        {
+            "id": "branch",
+            "kind": "switch",
+            "cases": [
+                {"when": 'inputs.mode == "fast"', "next": "fast_path"},
+            ],
+        }
+    )
+    result = execute(step, _ctx(tmp_path, inputs={"mode": "unknown"}))
+    assert result.success is False
+    assert result.error_message is not None
+    assert "No case matched" in result.error_message
+
+
+def test_switch_uses_step_outputs_in_condition(tmp_path: Path) -> None:
+    step = SwitchStep.model_validate(
+        {
+            "id": "branch",
+            "kind": "switch",
+            "cases": [
+                {"when": 'steps.check.outputs.status == "ok"', "next": "proceed"},
+            ],
+            "default": "fail",
+        }
+    )
+    result = execute(
+        step,
+        _ctx(tmp_path, inputs={}, step_outputs={"check": {"status": "ok"}}),
+    )
+    assert result.success is True
+    assert result.outputs == {"_next_step_id": "proceed"}
