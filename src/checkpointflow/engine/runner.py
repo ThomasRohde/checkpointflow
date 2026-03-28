@@ -10,21 +10,44 @@ import yaml
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 
 from checkpointflow.engine.evaluator import EvaluatorError, evaluate_condition
-from checkpointflow.engine.steps import await_event_step, cli_step, end_step
+from checkpointflow.engine.steps import (
+    api_step,
+    await_event_step,
+    cli_step,
+    end_step,
+    foreach_step,
+    parallel_step,
+    switch_step,
+    workflow_ref_step,
+)
 from checkpointflow.models.envelope import Envelope, WaitDetail, WaitResume
 from checkpointflow.models.errors import ErrorCode, ExitCode
 from checkpointflow.models.state import RunContext
 from checkpointflow.models.workflow import (
+    ApiStep,
     AwaitEventStep,
     CliStep,
     EndStep,
+    ForeachStep,
+    ParallelStep,
+    SwitchStep,
     Workflow,
     WorkflowDocument,
+    WorkflowRefStep,
 )
 from checkpointflow.persistence.store import PersistenceError, Store
 from checkpointflow.schema import validate_workflow_document
 
-Step = CliStep | AwaitEventStep | EndStep
+Step = (
+    CliStep
+    | ApiStep
+    | AwaitEventStep
+    | WorkflowRefStep
+    | SwitchStep
+    | ForeachStep
+    | ParallelStep
+    | EndStep
+)
 
 
 class RunError(Exception):
@@ -108,8 +131,13 @@ def _execute_steps(
     command: str,
 ) -> Envelope:
     """Execute a sequence of steps, returning an envelope on halt or completion."""
-    for i, step in enumerate(steps):
-        order = start_order + i
+    all_steps = list(workflow.steps)
+    step_ids = [s.id for s in all_steps]
+
+    idx = 0
+    while idx < len(steps):
+        step = steps[idx]
+        order = start_order + idx
 
         # Check if condition
         if step.step_if:
@@ -117,8 +145,10 @@ def _execute_steps(
             eval_ctx = _build_eval_context(inputs, step_outputs)
             try:
                 if not evaluate_condition(condition, eval_ctx):
+                    idx += 1
                     continue
             except EvaluatorError:
+                idx += 1
                 continue
 
         # Update run status
@@ -140,6 +170,16 @@ def _execute_steps(
             result = end_step.execute(step, ctx)
         elif isinstance(step, AwaitEventStep):
             result = await_event_step.execute(step, ctx)
+        elif isinstance(step, ApiStep):
+            result = api_step.execute(step, ctx)
+        elif isinstance(step, SwitchStep):
+            result = switch_step.execute(step, ctx)
+        elif isinstance(step, ForeachStep):
+            result = foreach_step.execute(step, ctx)
+        elif isinstance(step, ParallelStep):
+            result = parallel_step.execute(step, ctx, workflow_steps=all_steps)
+        elif isinstance(step, WorkflowRefStep):
+            result = workflow_ref_step.execute(step, ctx)
         else:
             store.update_run(run_id, status="failed")
             return Envelope.failure(
@@ -224,6 +264,26 @@ def _execute_steps(
                 current_step_id=step.id,
                 result=final_result if final_result else None,
             )
+
+        # SwitchStep: jump to the target step
+        if isinstance(step, SwitchStep) and result.outputs:
+            next_step_id = result.outputs.get("_next_step_id")
+            if next_step_id and next_step_id in step_ids:
+                target_idx = step_ids.index(next_step_id)
+                remaining = list(all_steps[target_idx:])
+                return _execute_steps(
+                    workflow,
+                    store,
+                    run_id,
+                    run_dir,
+                    inputs,
+                    step_outputs,
+                    remaining,
+                    order + 1,
+                    command,
+                )
+
+        idx += 1
 
     # Implicit completion (no explicit end step)
     store.update_run(run_id, status="completed")
