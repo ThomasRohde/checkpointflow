@@ -1,0 +1,71 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: publish_confluence_change
+  name: Publish Confluence change
+  description: Plan, approve, and apply a page update.
+  version: 0.1.0
+  defaults:
+    shell: bash
+    timeout_seconds: 300
+  inputs:
+    type: object
+    required: [page_id, source_file]
+    properties:
+      page_id:
+        type: string
+      source_file:
+        type: string
+
+  steps:
+    - id: plan
+      kind: cli
+      command: confpub plan --page-id ${inputs.page_id} --file ${inputs.source_file} --format json
+      outputs:
+        type: object
+        required: [plan_file, summary, risk_level]
+        properties:
+          plan_file: { type: string }
+          summary: { type: string }
+          risk_level:
+            type: string
+            enum: [low, medium, high]
+
+    - id: approval
+      kind: await_event
+      audience: user
+      event_name: change_approval
+      prompt: Review the proposed page update and approve or reject it.
+      input_schema:
+        type: object
+        required: [decision]
+        properties:
+          decision:
+            type: string
+            enum: [approve, reject]
+          comment:
+            type: string
+      transitions:
+        - when: ${event.decision == "approve"}
+          next: apply
+        - when: ${event.decision == "reject"}
+          next: rejected
+
+    - id: apply
+      kind: cli
+      command: confpub apply --plan ${steps.plan.outputs.plan_file} --format json
+      outputs:
+        type: object
+        required: [page_url]
+        properties:
+          page_url: { type: string }
+
+    - id: rejected
+      kind: end
+      result:
+        status: rejected
+
+  outputs:
+    type: object
+    properties:
+      page_url:
+        from: steps.apply.outputs.page_url

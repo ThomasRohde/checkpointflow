@@ -1,0 +1,44 @@
+{
+  "schema_version": "checkpointflow-run/v1",
+  "request_id": "01JQEXAMPLE00000000000001",
+  "ok": true,
+  "command": "run",
+  "status": "waiting",
+  "exit_code": 40,
+  "run_id": "01JQEXAMPLE00000000000002",
+  "checkpoint_id": "01JQEXAMPLE00000000000003",
+  "current_step_id": "approval",
+  "wait": {
+    "kind": "external_event",
+    "audience": "user",
+    "event_name": "change_approval",
+    "prompt": "Review the proposed page update and approve or reject it.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "decision"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "instructions": [
+      "Ask the intended audience for input using the prompt.",
+      "Collect JSON that matches input_schema.",
+      "Resume with the provided run_id and event_name."
+    ],
+    "resume": {
+      "command": "cpf resume --run-id 01JQEXAMPLE00000000000002 --event change_approval --input @response.json"
+    }
+  }
+}
