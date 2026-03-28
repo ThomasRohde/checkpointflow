@@ -42,14 +42,27 @@ def _parse_input(raw: str) -> dict[str, Any]:
     return json.loads(raw)  # type: ignore[no-any-return]
 
 
-def _build_wait_detail(step: AwaitEventStep, run_id: str) -> WaitDetail:
+def _build_wait_detail(
+    step: AwaitEventStep,
+    run_id: str,
+    eval_ctx: dict[str, Any] | None = None,
+) -> WaitDetail:
     """Build WaitDetail for awaiting step."""
+    from checkpointflow.engine.evaluator import interpolate as _interpolate
+
     resume_cmd = f"cpf resume --run-id {run_id} --event {step.event_name} --input @event.json"
+    prompt = step.prompt
+    summary = step.summary
+    if eval_ctx:
+        if prompt and "${" in prompt:
+            prompt = _interpolate(prompt, eval_ctx)
+        if summary and "${" in summary:
+            summary = _interpolate(summary, eval_ctx)
     return WaitDetail(
         audience=step.audience,
         event_name=step.event_name,
-        prompt=step.prompt,
-        summary=step.summary,
+        prompt=prompt,
+        summary=summary,
         input_schema=step.input_schema,
         instructions=[
             "Ask the intended audience for input using the prompt.",
@@ -182,7 +195,8 @@ def _execute_steps(
                 expected_event_name=step.event_name,
                 expected_event_schema=json.dumps(step.input_schema),
             )
-            wait_detail = _build_wait_detail(step, run_id)
+            wait_eval_ctx = _build_eval_context(inputs, step_outputs)
+            wait_detail = _build_wait_detail(step, run_id, eval_ctx=wait_eval_ctx)
             return Envelope.success(
                 command=command,
                 status="waiting",

@@ -126,11 +126,6 @@ workflow:
         git push origin master --tags
       timeout_seconds: 600
 
-    - id: reinstall
-      kind: cli
-      cwd: ${inputs.project_dir}
-      command: uv tool install -e . --force
-
     - id: released
       kind: end
       result:
