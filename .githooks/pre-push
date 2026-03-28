@@ -4,4 +4,5 @@
 
 run_step "Running test suite" uv run pytest
 run_step "Building distributions" uv build
-run_step "Smoke testing built wheel" uv tool run --isolated --from ./dist/*.whl cpf --help
+whl=$(ls dist/*.whl 2>/dev/null | head -1)
+run_step "Smoke testing built wheel" uv tool run --isolated --from "$whl" cpf --help
