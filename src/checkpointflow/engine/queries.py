@@ -125,6 +125,8 @@ def query_inspect(
                 "error_code": sr["error_code"],
                 "error_message": sr["error_message"],
                 "outputs": json.loads(sr["outputs_json"]) if sr["outputs_json"] else None,
+                "stdout_path": sr["stdout_path"],
+                "stderr_path": sr["stderr_path"],
                 "created_at": sr["created_at"],
             }
             for sr in step_results

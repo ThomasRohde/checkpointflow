@@ -12,6 +12,21 @@ from checkpointflow.models.state import RunContext, StepResult
 from checkpointflow.models.workflow import CliStep
 
 
+def _build_subprocess_args(command: str, shell: str | None) -> dict[str, Any]:
+    """Build subprocess.run kwargs for the given shell."""
+    if shell and shell.lower() in ("powershell", "pwsh", "powershell.exe", "pwsh.exe"):
+        exe = "pwsh" if shell.lower() in ("pwsh", "pwsh.exe") else "powershell"
+        return {
+            "args": [exe, "-NoProfile", "-NonInteractive", "-Command", command],
+            "shell": False,
+        }
+    if shell and shell.lower() not in ("bash", "sh", "cmd", "cmd.exe"):
+        # Explicit shell: pass as executable
+        return {"args": command, "shell": True, "executable": shell}
+    # Default: system shell
+    return {"args": command, "shell": True}
+
+
 def execute(step: CliStep, ctx: RunContext) -> StepResult:
     # Build evaluator context
     eval_ctx: dict[str, Any] = {
@@ -36,10 +51,10 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
     stdout_path = ctx.run_dir / "stdout" / f"{step.id}.txt"
     stderr_path = ctx.run_dir / "stderr" / f"{step.id}.txt"
 
+    shell_args = _build_subprocess_args(resolved_cmd, step.shell)
     try:
         proc = subprocess.run(
-            resolved_cmd,
-            shell=True,
+            **shell_args,
             capture_output=True,
             text=True,
             timeout=timeout,
