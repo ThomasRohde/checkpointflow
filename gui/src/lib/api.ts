@@ -49,4 +49,12 @@ export const api = {
       `${BASE}/workflows?path=${encodeURIComponent(path)}`
     );
   },
+
+  async deleteRun(id: string): Promise<void> {
+    const res = await fetch(`${BASE}/runs/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `Delete failed: ${res.status}`);
+    }
+  },
 };

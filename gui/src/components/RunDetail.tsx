@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ChevronDown,
@@ -12,6 +12,7 @@ import {
   Loader2,
   FileText,
   AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import { api } from "../lib/api";
 import type { StepResult, StepKind } from "../lib/types";
@@ -214,9 +215,22 @@ function StepItem({
   );
 }
 
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
 export function RunDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [showInputs, setShowInputs] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deleteRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      navigate("/");
+    },
+  });
 
   const {
     data: run,
@@ -280,7 +294,43 @@ export function RunDetail() {
               Version {run.workflow_version}
             </p>
           </div>
-          <StatusBadge status={run.status} />
+          <div className="flex items-center gap-2">
+            <StatusBadge status={run.status} />
+            {TERMINAL_STATUSES.has(run.status) && (
+              <>
+                {confirmDelete ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => deleteMutation.mutate()}
+                      disabled={deleteMutation.isPending}
+                      className="px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors disabled:opacity-50"
+                    >
+                      {deleteMutation.isPending ? "Deleting..." : "Confirm"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-2 py-1 text-xs font-medium text-zinc-600 bg-zinc-100 hover:bg-zinc-200 rounded-md transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                    title="Delete run"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+                {deleteMutation.isError && (
+                  <span className="text-xs text-red-600">
+                    {(deleteMutation.error as Error).message}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-4 text-sm">
           <div>
