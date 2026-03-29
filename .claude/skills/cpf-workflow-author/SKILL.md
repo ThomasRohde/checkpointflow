@@ -311,6 +311,32 @@ Operators: `==`, `!=`, `and`, `or`
   result: { outcome: rejected }
 ```
 
+**Cover every enum value with a transition** — once an `await_event` has `transitions`, the runtime does NOT fall through to the next step. If no transition matches, the run **fails** with "No transition matched." Every possible enum value in the `input_schema` must have a corresponding `when` clause:
+
+```yaml
+# WRONG — "ship_it" has no transition, run will fail
+input_schema:
+  properties:
+    decision: { type: string, enum: [ship_it, revise, shelve] }
+transitions:
+  - when: ${event.decision == "revise"}
+    next: revision
+  - when: ${event.decision == "shelve"}
+    next: shelved
+  # Missing: ship_it → approved
+
+# CORRECT — every enum value is covered
+transitions:
+  - when: ${event.decision == "ship_it"}
+    next: approved
+  - when: ${event.decision == "revise"}
+    next: revision
+  - when: ${event.decision == "shelve"}
+    next: shelved
+```
+
+The same rule applies to `switch` cases — if no case matches and no `default` is set, the run fails.
+
 Be aware that steps between a transition target and the next step will execute sequentially. If `do_work` transitions to step `complete`, but `rejected` comes after `complete` in the array, the `rejected` step will NOT be reached from the `do_work` path — execution flows forward from `do_work` through `complete` and stops at the `end`. Place your branch targets so that sequential fall-through does not hit steps from other branches, or use `end` steps to terminate each branch.
 
 ## Common mistakes to avoid
@@ -320,6 +346,7 @@ Be aware that steps between a transition target and the next step will execute s
 - **Transition target doesn't exist** — every `next` value must match an actual step `id`.
 - **Using `${}` in `if` conditions** — `if` takes a bare expression, not wrapped in `${}`.
 - **Forgetting `input_schema` on `await_event`** — it's required, not optional.
+- **Incomplete transition coverage** — when `await_event` has `transitions`, every possible `input_schema` enum value must have a matching `when` clause. Uncovered values cause a runtime failure, not a fallthrough.
 - **Step kind typos** — supported kinds are `cli`, `await_event`, `end`, `switch`, `api`, `foreach`, `parallel`, and `workflow`. Any other kind fails at runtime with exit code 80.
 
 ## After writing the workflow

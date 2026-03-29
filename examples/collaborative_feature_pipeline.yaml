@@ -1,0 +1,363 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: collaborative_feature_pipeline
+  name: Collaborative Feature Development Pipeline
+  version: 1.0.0
+  description: >
+    Showcase workflow demonstrating agent-human collaboration through research,
+    parallel analysis, iterative decision-making, and dynamic branching.
+    Features every step kind: cli, await_event, switch, parallel, foreach, end.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    required: [feature_idea, project_name]
+    properties:
+      feature_idea:
+        type: string
+        description: A rough description of the feature to develop
+      project_name:
+        type: string
+        description: Name of the project this feature belongs to
+      priority:
+        type: string
+        enum: [critical, normal, low]
+        description: Feature priority level (affects workflow routing)
+
+  steps:
+    # ── Phase 1: Agent Research ──────────────────────────────
+    - id: research
+      kind: cli
+      name: "Agent: Analyze Feature Idea"
+      description: Agent investigates the feature space and produces an initial assessment
+      command: >-
+        echo '{"summary":"Analysis complete for: ${inputs.feature_idea}",
+        "complexity":"medium",
+        "risks":["scope creep","dependency on external API","migration complexity"],
+        "opportunities":["40% UX improvement","reduces support tickets by 25%","enables future integrations"],
+        "similar_features":["Competitor A has basic version","Open-source library available","Internal prototype from Q2"]}'
+      outputs:
+        type: object
+        required: [summary, complexity, risks, opportunities]
+        properties:
+          summary: { type: string }
+          complexity: { type: string }
+          risks: { type: array, items: { type: string } }
+          opportunities: { type: array, items: { type: string } }
+          similar_features: { type: array, items: { type: string } }
+
+    # ── Phase 2: Human Sets Direction ────────────────────────
+    - id: direction_review
+      kind: await_event
+      name: "Human: Set Direction"
+      audience: user
+      event_name: direction_decision
+      prompt: |
+        Agent research complete for "${inputs.feature_idea}"
+
+        Complexity: ${steps.research.outputs.complexity}
+        Risks: ${steps.research.outputs.risks}
+        Opportunities: ${steps.research.outputs.opportunities}
+        Similar work: ${steps.research.outputs.similar_features}
+
+        How would you like to proceed?
+        - full_build: Complete feature implementation
+        - mvp: Minimum viable version only
+        - spike: Time-boxed research spike
+        - cancel: Abandon this feature
+      input_schema:
+        type: object
+        required: [direction]
+        properties:
+          direction:
+            type: string
+            enum: [full_build, mvp, spike, cancel]
+          guidance:
+            type: string
+            description: Any specific guidance or constraints for the agent
+      transitions:
+        - when: ${event.direction == "cancel"}
+          next: cancelled
+        - when: ${event.direction == "spike"}
+          next: spike_research
+
+    # ── Phase 3: Priority Routing ────────────────────────────
+    - id: priority_route
+      kind: switch
+      name: "System: Route by Priority"
+      cases:
+        - when: 'inputs.priority == "critical"'
+          next: fast_track_notice
+      default: parallel_analysis
+
+    - id: fast_track_notice
+      kind: cli
+      name: "System: Fast Track Alert"
+      command: echo '{"message":"FAST TRACK activated for ${inputs.project_name}. Expedited analysis in progress."}'
+
+    # ── Phase 4: Parallel Deep Analysis (3 concurrent tracks) ─
+    - id: parallel_analysis
+      kind: parallel
+      name: "Agent: Run 3 Analysis Tracks in Parallel"
+      branches:
+        - start_at: technical_feasibility
+        - start_at: effort_estimation
+        - start_at: dependency_audit
+
+    - id: technical_feasibility
+      kind: cli
+      name: "Agent: Technical Feasibility Check"
+      command: >-
+        echo '{"feasible":true,
+        "tech_stack":["TypeScript","React","PostgreSQL"],
+        "new_deps":["redis","bull-mq"],
+        "confidence":0.87,
+        "concerns":["Redis cluster management","Queue monitoring needs"]}'
+      outputs:
+        type: object
+        required: [feasible, confidence]
+        properties:
+          feasible: { type: boolean }
+          tech_stack: { type: array }
+          new_deps: { type: array }
+          confidence: { type: number }
+          concerns: { type: array }
+
+    - id: effort_estimation
+      kind: cli
+      name: "Agent: Effort Estimation"
+      command: >-
+        echo '{"total_days":14,
+        "breakdown":{"design":2,"backend":5,"frontend":4,"testing":2,"docs":1},
+        "team_size":2,
+        "parallel_possible":true}'
+      outputs:
+        type: object
+        required: [total_days, breakdown]
+        properties:
+          total_days: { type: number }
+          breakdown: { type: object }
+          team_size: { type: number }
+          parallel_possible: { type: boolean }
+
+    - id: dependency_audit
+      kind: cli
+      name: "Agent: Dependency Audit"
+      command: >-
+        echo '{"blockers":[],
+        "soft_deps":["auth-service >= 2.1.0","shared-types >= 3.0.0"],
+        "external_apis":["Stripe Payments API","SendGrid Email API"],
+        "license_ok":true}'
+      outputs:
+        type: object
+        required: [blockers, license_ok]
+        properties:
+          blockers: { type: array }
+          soft_deps: { type: array }
+          external_apis: { type: array }
+          license_ok: { type: boolean }
+
+    # ── Phase 5: Agent Synthesizes Findings ──────────────────
+    - id: synthesize
+      kind: cli
+      name: "Agent: Synthesize All Findings"
+      command: >-
+        echo '{"recommendation":"proceed",
+        "design_sections":["Problem Statement","User Stories","Technical Architecture","API Design","Data Model Changes","Testing Strategy","Rollout Plan"],
+        "open_questions":["Redis hosting: managed vs self-hosted?","API versioning: URL path vs header?","Feature flag rollout percentage?"]}'
+      outputs:
+        type: object
+        required: [recommendation, design_sections, open_questions]
+        properties:
+          recommendation: { type: string }
+          design_sections: { type: array }
+          open_questions: { type: array }
+
+    # ── Phase 6: Human Makes Architectural Decisions ─────────
+    - id: architecture_review
+      kind: await_event
+      name: "Human: Architectural Decisions"
+      audience: user
+      event_name: arch_decisions
+      prompt: |
+        Analysis complete for "${inputs.feature_idea}"
+
+        Feasibility confidence: ${steps.technical_feasibility.outputs.confidence}
+        Estimated effort: ${steps.effort_estimation.outputs.total_days} days, ${steps.effort_estimation.outputs.team_size} engineers
+        Blockers found: ${steps.dependency_audit.outputs.blockers}
+        New dependencies needed: ${steps.technical_feasibility.outputs.new_deps}
+
+        Open questions the agent needs your input on:
+        ${steps.synthesize.outputs.open_questions}
+
+        Provide your decisions and whether to proceed with planning.
+      input_schema:
+        type: object
+        required: [proceed, answers]
+        properties:
+          proceed:
+            type: boolean
+            description: Whether to proceed with implementation planning
+          answers:
+            type: object
+            description: Your answers to the open questions
+          scope_notes:
+            type: string
+            description: Any scope adjustments or additional constraints
+      transitions:
+        - when: ${event.proceed == false}
+          next: revision_needed
+
+    # ── Phase 7: Agent Generates Plan Sections (foreach) ─────
+    - id: generate_plan_sections
+      kind: foreach
+      name: "Agent: Draft Each Plan Section"
+      items: steps.synthesize.outputs.design_sections
+      body:
+        - id: write_section
+          kind: cli
+          command: echo "Section ${item_index} drafted -- ${item}"
+
+    # ── Phase 8: Agent Compiles Final Plan ───────────────────
+    - id: compile_plan
+      kind: cli
+      name: "Agent: Compile Final Plan"
+      command: >-
+        echo '{"plan_ready":true,
+        "total_sections":7,
+        "project":"${inputs.project_name}",
+        "feature":"${inputs.feature_idea}",
+        "next_actions":["Create tracking epic","Schedule team kickoff","Set up feature branch","Provision infrastructure","Draft API contract"]}'
+      outputs:
+        type: object
+        required: [plan_ready, total_sections, next_actions]
+        properties:
+          plan_ready: { type: boolean }
+          total_sections: { type: number }
+          project: { type: string }
+          feature: { type: string }
+          next_actions: { type: array }
+
+    # ── Phase 9: Final Human Sign-off ────────────────────────
+    - id: final_signoff
+      kind: await_event
+      name: "Human: Final Sign-off"
+      audience: user
+      event_name: final_decision
+      prompt: |
+        Feature plan for "${inputs.feature_idea}" is ready.
+
+        Plan sections: ${steps.compile_plan.outputs.total_sections}
+        Next actions if approved: ${steps.compile_plan.outputs.next_actions}
+
+        Your call:
+        - ship_it: Approve and begin implementation
+        - revise: Send back for changes
+        - shelve: Park for later
+      input_schema:
+        type: object
+        required: [decision]
+        properties:
+          decision:
+            type: string
+            enum: [ship_it, revise, shelve]
+          feedback:
+            type: string
+            description: Any final notes or feedback
+      transitions:
+        - when: ${event.decision == "ship_it"}
+          next: approved
+        - when: ${event.decision == "revise"}
+          next: revision_needed
+        - when: ${event.decision == "shelve"}
+          next: shelved
+
+    # ── Terminal States ──────────────────────────────────────
+    - id: approved
+      kind: end
+      result:
+        status: approved
+        project: ${inputs.project_name}
+        feature: ${inputs.feature_idea}
+        message: Feature plan approved and ready for implementation.
+
+    - id: revision_needed
+      kind: end
+      result:
+        status: needs_revision
+        project: ${inputs.project_name}
+        message: Sent back for revision. Update inputs and re-run.
+
+    - id: shelved
+      kind: end
+      result:
+        status: shelved
+        project: ${inputs.project_name}
+        message: Feature shelved for future consideration.
+
+    - id: cancelled
+      kind: end
+      result:
+        status: cancelled
+        project: ${inputs.project_name}
+        message: Feature cancelled based on initial review.
+
+    # ── Spike Branch (reached via transition from direction_review) ─
+    - id: spike_research
+      kind: cli
+      name: "Agent: Execute Research Spike"
+      command: >-
+        echo '{"spike_complete":true,
+        "findings":"Detailed research completed for: ${inputs.feature_idea}",
+        "recommendation":"Proceed with MVP approach after spike validates core assumption",
+        "artifacts":["spike-report.md","prototype/","benchmark-results.json"],
+        "time_box":"2 days"}'
+      outputs:
+        type: object
+        required: [spike_complete, findings]
+        properties:
+          spike_complete: { type: boolean }
+          findings: { type: string }
+          recommendation: { type: string }
+          artifacts: { type: array }
+          time_box: { type: string }
+
+    - id: spike_review
+      kind: await_event
+      name: "Human: Review Spike Results"
+      audience: user
+      event_name: spike_review_decision
+      prompt: |
+        Research spike complete.
+
+        Findings: ${steps.spike_research.outputs.findings}
+        Recommendation: ${steps.spike_research.outputs.recommendation}
+        Artifacts produced: ${steps.spike_research.outputs.artifacts}
+        Time spent: ${steps.spike_research.outputs.time_box}
+
+        Based on the spike results, what next?
+        - promote: Move to full feature development (re-run with full_build or mvp)
+        - shelve: Park the idea for now
+      input_schema:
+        type: object
+        required: [next_action]
+        properties:
+          next_action:
+            type: string
+            enum: [promote, shelve]
+          notes:
+            type: string
+      transitions:
+        - when: ${event.next_action == "promote"}
+          next: spike_promoted
+        - when: ${event.next_action == "shelve"}
+          next: shelved
+
+    - id: spike_promoted
+      kind: end
+      result:
+        status: spike_promoted
+        project: ${inputs.project_name}
+        message: Spike validated the approach. Re-run with direction full_build or mvp to proceed.
