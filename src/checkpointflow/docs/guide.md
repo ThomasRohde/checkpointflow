@@ -54,7 +54,9 @@ Steps execute sequentially. Each step must have a unique `id`. If no `end` step 
 
 ### cli (supported)
 
-Runs a shell command. The command string supports `${inputs.x}` and `${steps.<id>.outputs.x}` interpolation.
+Runs a shell command. The command supports `${inputs.x}` and `${steps.<id>.outputs.x}` interpolation.
+
+`command` accepts either a string or a list of strings. When a list is provided, commands are joined with `&&` so they run sequentially and stop on first failure. Using a list avoids YAML multi-line scalar pitfalls.
 
 Required fields: `id`, `kind: cli`, `command`
 

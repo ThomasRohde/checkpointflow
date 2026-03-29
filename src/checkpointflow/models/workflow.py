@@ -50,7 +50,7 @@ class BaseStepFields(BaseModel):
 
 class CliStep(BaseStepFields):
     kind: Literal["cli"]
-    command: str
+    command: str | list[str]
     shell: str | None = None
     cwd: str | None = None
     success: Success | None = None

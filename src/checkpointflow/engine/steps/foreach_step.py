@@ -110,8 +110,13 @@ def execute(step: ForeachStep, ctx: RunContext) -> StepResult:
                     },
                 }
 
+                raw_cmd = (
+                    " && ".join(body_step.command)
+                    if isinstance(body_step.command, list)
+                    else body_step.command
+                )
                 try:
-                    resolved_command = interpolate(body_step.command, item_ctx)
+                    resolved_command = interpolate(raw_cmd, item_ctx)
                 except EvaluatorError as exc:
                     return StepResult(
                         success=False,

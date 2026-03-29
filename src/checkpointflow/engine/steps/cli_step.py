@@ -43,9 +43,12 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
         "steps": {sid: {"outputs": outs} for sid, outs in ctx.step_outputs.items()},
     }
 
+    # Normalize list commands to && chain
+    raw_command = " && ".join(step.command) if isinstance(step.command, list) else step.command
+
     # Resolve command expressions
     try:
-        resolved_cmd = interpolate(step.command, eval_ctx)
+        resolved_cmd = interpolate(raw_command, eval_ctx)
     except EvaluatorError as exc:
         return StepResult(
             success=False,

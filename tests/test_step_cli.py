@@ -154,3 +154,59 @@ def test_cli_step_non_json_with_outputs_schema_fails(tmp_path: Path) -> None:
     result = execute(step, _ctx(tmp_path))
     assert result.success is False
     assert result.error_code == "ERR_STEP_OUTPUT_INVALID"
+
+
+def test_cli_step_command_as_list(tmp_path: Path) -> None:
+    """command can be a list of strings, joined with && at runtime."""
+    step = CliStep.model_validate(
+        {
+            "id": "multi",
+            "kind": "cli",
+            "command": ["echo hello", "echo world"],
+            "shell": "bash",
+        }
+    )
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is True
+    stdout = (tmp_path / "stdout" / "multi.txt").read_text()
+    assert "hello" in stdout
+    assert "world" in stdout
+
+
+def test_cli_step_command_list_stops_on_failure(tmp_path: Path) -> None:
+    """If one command in the list fails, subsequent ones do not run."""
+    step = CliStep.model_validate(
+        {
+            "id": "fail_mid",
+            "kind": "cli",
+            "command": ["echo before", "exit 1", "echo after"],
+            "shell": "bash",
+        }
+    )
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is False
+    stdout = (tmp_path / "stdout" / "fail_mid.txt").read_text()
+    assert "before" in stdout
+    assert "after" not in stdout
+
+
+def test_cli_step_command_list_single_element(tmp_path: Path) -> None:
+    step = CliStep.model_validate({"id": "one", "kind": "cli", "command": ["echo solo"]})
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is True
+
+
+def test_cli_step_command_list_with_interpolation(tmp_path: Path) -> None:
+    step = CliStep.model_validate(
+        {
+            "id": "interp",
+            "kind": "cli",
+            "command": ["echo ${inputs.name}", "echo done"],
+            "shell": "bash",
+        }
+    )
+    result = execute(step, _ctx(tmp_path, inputs={"name": "test"}))
+    assert result.success is True
+    stdout = (tmp_path / "stdout" / "interp.txt").read_text()
+    assert "test" in stdout
+    assert "done" in stdout
