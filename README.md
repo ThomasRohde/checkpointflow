@@ -310,10 +310,10 @@ It is not trying to be a general-purpose programming language or a heavyweight d
 
 ## Documentation
 
-- [Workflow Schema](./schemas/checkpointflow.schema.json)
-- [Run Envelope Schema](./schemas/checkpointflow-run-envelope.schema.json)
-- [Example Workflow](./examples/publish-confluence-change.yaml)
-- [Contributing](./CONTRIBUTING.md)
+- [Workflow Schema](https://github.com/ThomasRohde/checkpointflow/blob/master/schemas/checkpointflow.schema.json)
+- [Run Envelope Schema](https://github.com/ThomasRohde/checkpointflow/blob/master/schemas/checkpointflow-run-envelope.schema.json)
+- [Example Workflow](https://github.com/ThomasRohde/checkpointflow/blob/master/examples/publish-confluence-change.yaml)
+- [Contributing](https://github.com/ThomasRohde/checkpointflow/blob/master/CONTRIBUTING.md)
 
 ## Development
 
