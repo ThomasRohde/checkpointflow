@@ -1,9 +1,13 @@
 schema_version: checkpointflow/v1
 workflow:
   id: cpf_quiz
-  name: checkpointflow Quiz
+  name: checkpointflow Knowledge Quiz
   version: 0.1.0
-  description: A three-question quiz to test your knowledge of checkpointflow.
+  description: >
+    Interactive three-question quiz about checkpointflow concepts.
+    Tests knowledge of exit codes, step kinds, and envelope fields.
+    Each wrong answer gets immediate feedback before moving on.
+    Demonstrates chained await_event steps with transition branching.
 
   inputs:
     type: object

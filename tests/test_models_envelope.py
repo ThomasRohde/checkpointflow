@@ -63,3 +63,24 @@ def test_envelope_failure_factory() -> None:
 def test_envelope_schema_version_is_fixed() -> None:
     envelope = Envelope(ok=True, command="test", status="completed")
     assert envelope.schema_version == "checkpointflow-run/v1"
+
+
+def test_envelope_includes_workflow_name_and_description() -> None:
+    envelope = Envelope(
+        ok=True,
+        command="run",
+        status="completed",
+        workflow_id="wf1",
+        workflow_name="My Workflow",
+        workflow_description="Does things",
+    )
+    data = json.loads(envelope.to_json())
+    assert data["workflow_name"] == "My Workflow"
+    assert data["workflow_description"] == "Does things"
+
+
+def test_envelope_omits_workflow_name_when_none() -> None:
+    envelope = Envelope(ok=True, command="run", status="completed", workflow_id="wf1")
+    data = json.loads(envelope.to_json())
+    assert "workflow_name" not in data
+    assert "workflow_description" not in data

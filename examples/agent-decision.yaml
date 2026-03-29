@@ -1,9 +1,12 @@
 schema_version: checkpointflow/v1
 workflow:
   id: agent_decision
-  name: Agent Decision
+  name: Agent Analysis with Human Review
   version: 0.1.0
-  description: An agent analyzes data and a human reviews the recommendation.
+  description: >
+    An agent analyzes a data source, then pauses for human review.
+    The human can approve (which applies the changes) or request revisions.
+    Demonstrates the basic agent-does-work, human-approves pattern.
 
   inputs:
     type: object
@@ -11,6 +14,8 @@ workflow:
     properties:
       data_source:
         type: string
+        description: Data source identifier for the agent to analyze
+        examples: ["sales_q1", "user_signups_march", "churn_report_2026"]
 
   steps:
     - id: analyze

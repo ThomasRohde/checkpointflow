@@ -44,6 +44,12 @@
     "workflow_id": {
       "type": "string"
     },
+    "workflow_name": {
+      "type": "string"
+    },
+    "workflow_description": {
+      "type": "string"
+    },
     "workflow_version": {
       "type": "string"
     },

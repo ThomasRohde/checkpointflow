@@ -1,0 +1,373 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: cpf_feature_development
+  name: CPF Feature Development
+  version: 1.0.0
+  description: >
+    Development workflow for adding features to checkpointflow itself.
+    Follows the project's TDD methodology: write failing tests first,
+    implement to make them pass, then run the full quality gate.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    required: [feature_name, description]
+    properties:
+      feature_name:
+        type: string
+        description: Short name for the feature
+        examples: ["run-delete", "gui-filter", "batch-resume"]
+      description:
+        type: string
+        description: What the feature should do and why
+        examples:
+          - "Allow users to delete finished runs from the GUI"
+          - "Add filtering by status in the run list"
+      area:
+        type: string
+        enum: [cli, engine, gui, persistence, schema, models]
+        description: Primary area of the codebase this feature affects
+
+  steps:
+    # ── Phase 1: Codebase Analysis ──────────────────────────
+    - id: analyze_codebase
+      kind: cli
+      name: "Agent: Analyze Affected Area"
+      description: Scan the relevant source area and identify files, tests, and dependencies
+      command: >-
+        echo '{"area":"${inputs.area}",
+        "source_dir":"src/checkpointflow/${inputs.area}/",
+        "existing_tests":"tests/test_${inputs.area}*.py",
+        "imports_to_check":["models","engine","persistence"],
+        "schema_impact":false,
+        "notes":"Analyzed area: ${inputs.area} for feature: ${inputs.feature_name}"}'
+      outputs:
+        type: object
+        required: [area, source_dir, notes]
+        properties:
+          area: { type: string }
+          source_dir: { type: string }
+          existing_tests: { type: string }
+          imports_to_check: { type: array, items: { type: string } }
+          schema_impact: { type: boolean }
+          notes: { type: string }
+
+    # ── Phase 2: Human Scoping Decision ─────────────────────
+    - id: scope_decision
+      kind: await_event
+      name: "Human: Set Scope"
+      audience: user
+      event_name: scope_choice
+      prompt: |
+        Feature: ${inputs.feature_name}
+        Description: ${inputs.description}
+        Affected area: ${steps.analyze_codebase.outputs.area}
+        Source directory: ${steps.analyze_codebase.outputs.source_dir}
+        Existing tests: ${steps.analyze_codebase.outputs.existing_tests}
+        Schema impact: ${steps.analyze_codebase.outputs.schema_impact}
+
+        How should we scope this?
+        - full: Complete implementation with tests, docs, and CLI surface
+        - minimal: Core logic and tests only, no docs update
+        - spike: Explore feasibility, no production code
+        - cancel: Drop this feature
+      input_schema:
+        type: object
+        required: [scope]
+        properties:
+          scope:
+            type: string
+            enum: [full, minimal, spike, cancel]
+          constraints:
+            type: string
+            description: Any constraints or guidance for the implementation
+      transitions:
+        - when: ${event.scope == "cancel"}
+          next: cancelled
+        - when: ${event.scope == "spike"}
+          next: spike
+
+    # ── Phase 3: Route by scope ─────────────────────────────
+    - id: scope_route
+      kind: switch
+      name: "System: Route by Scope"
+      cases:
+        - when: 'steps.scope_decision.outputs.scope == "full"'
+          next: tdd_plan
+      default: tdd_plan
+
+    # ── Phase 4: TDD Plan ───────────────────────────────────
+    - id: tdd_plan
+      kind: cli
+      name: "Agent: Draft TDD Plan"
+      description: Plan the test cases before writing any implementation code
+      command: >-
+        echo '{"feature":"${inputs.feature_name}",
+        "test_file":"tests/test_${inputs.feature_name}.py",
+        "test_cases":["test_basic_${inputs.feature_name}","test_${inputs.feature_name}_edge_cases","test_${inputs.feature_name}_error_handling"],
+        "fixtures_needed":["sample_workflow","tmp_state_dir"],
+        "implementation_steps":["Add model types if needed","Implement core logic","Wire into CLI or engine","Update schema if needed"]}'
+      outputs:
+        type: object
+        required: [feature, test_file, test_cases, implementation_steps]
+        properties:
+          feature: { type: string }
+          test_file: { type: string }
+          test_cases: { type: array, items: { type: string } }
+          fixtures_needed: { type: array, items: { type: string } }
+          implementation_steps: { type: array, items: { type: string } }
+
+    # ── Phase 5: Human Reviews Test Plan ────────────────────
+    - id: review_tdd_plan
+      kind: await_event
+      name: "Human: Review TDD Plan"
+      audience: user
+      event_name: tdd_review
+      prompt: |
+        TDD plan for "${inputs.feature_name}":
+
+        Test file: ${steps.tdd_plan.outputs.test_file}
+        Test cases: ${steps.tdd_plan.outputs.test_cases}
+        Fixtures needed: ${steps.tdd_plan.outputs.fixtures_needed}
+
+        Implementation steps: ${steps.tdd_plan.outputs.implementation_steps}
+
+        Approve the plan, request changes, or cancel?
+      input_schema:
+        type: object
+        required: [decision]
+        properties:
+          decision:
+            type: string
+            enum: [approve, revise, cancel]
+          feedback:
+            type: string
+            description: Feedback or changes to the plan
+      transitions:
+        - when: ${event.decision == "cancel"}
+          next: cancelled
+        - when: ${event.decision == "revise"}
+          next: needs_revision
+
+    # ── Phase 6: Implement (tests first, then code) ────────
+    - id: write_tests
+      kind: cli
+      name: "Agent: Write Failing Tests"
+      description: Write the test file with all planned test cases (they should fail)
+      command: >-
+        echo '{"tests_written":true,
+        "test_file":"tests/test_${inputs.feature_name}.py",
+        "test_count":3,
+        "status":"all_failing",
+        "message":"Wrote 3 test cases. All fail as expected (no implementation yet)."}'
+      outputs:
+        type: object
+        required: [tests_written, test_count, status]
+        properties:
+          tests_written: { type: boolean }
+          test_file: { type: string }
+          test_count: { type: number }
+          status: { type: string }
+          message: { type: string }
+
+    - id: implement_feature
+      kind: cli
+      name: "Agent: Implement Feature"
+      description: Write the production code to make the tests pass
+      command: >-
+        echo '{"implemented":true,
+        "files_changed":["src/checkpointflow/${inputs.area}/__init__.py","src/checkpointflow/cli.py"],
+        "lines_added":85,
+        "lines_removed":3,
+        "message":"Feature ${inputs.feature_name} implemented. Tests should now pass."}'
+      outputs:
+        type: object
+        required: [implemented, files_changed]
+        properties:
+          implemented: { type: boolean }
+          files_changed: { type: array, items: { type: string } }
+          lines_added: { type: number }
+          lines_removed: { type: number }
+          message: { type: string }
+
+    # ── Phase 7: Quality Gate (parallel checks) ─────────────
+    - id: quality_gate
+      kind: parallel
+      name: "Agent: Run Quality Gate"
+      branches:
+        - start_at: check_lint
+        - start_at: check_types
+        - start_at: check_tests
+
+    - id: check_lint
+      kind: cli
+      name: "Agent: Ruff Lint + Format"
+      command: >-
+        echo '{"lint_ok":true,"format_ok":true,"issues":0}'
+      outputs:
+        type: object
+        required: [lint_ok, format_ok]
+        properties:
+          lint_ok: { type: boolean }
+          format_ok: { type: boolean }
+          issues: { type: number }
+
+    - id: check_types
+      kind: cli
+      name: "Agent: Mypy Strict"
+      command: >-
+        echo '{"mypy_ok":true,"errors":0,"notes":"Strict mode passed"}'
+      outputs:
+        type: object
+        required: [mypy_ok]
+        properties:
+          mypy_ok: { type: boolean }
+          errors: { type: number }
+          notes: { type: string }
+
+    - id: check_tests
+      kind: cli
+      name: "Agent: Pytest"
+      command: >-
+        echo '{"pytest_ok":true,"passed":42,"failed":0,"skipped":1,"duration":"3.2s"}'
+      outputs:
+        type: object
+        required: [pytest_ok, passed, failed]
+        properties:
+          pytest_ok: { type: boolean }
+          passed: { type: number }
+          failed: { type: number }
+          skipped: { type: number }
+          duration: { type: string }
+
+    # ── Phase 8: Gate Check ─────────────────────────────────
+    - id: gate_result
+      kind: switch
+      name: "System: Check Gate Results"
+      cases:
+        - when: 'steps.check_lint.outputs.lint_ok == true and steps.check_types.outputs.mypy_ok == true and steps.check_tests.outputs.pytest_ok == true'
+          next: final_review
+      default: gate_failed
+
+    - id: gate_failed
+      kind: end
+      result:
+        status: gate_failed
+        feature: ${inputs.feature_name}
+        message: Quality gate failed. Fix issues and re-run.
+
+    # ── Phase 9: Docs Update (foreach, only for full scope) ─
+    - id: final_review
+      kind: await_event
+      name: "Human: Review Implementation"
+      audience: user
+      event_name: implementation_review
+      prompt: |
+        Feature "${inputs.feature_name}" is implemented and passing all checks.
+
+        Tests: ${steps.check_tests.outputs.passed} passed, ${steps.check_tests.outputs.failed} failed (${steps.check_tests.outputs.duration})
+        Lint OK: ${steps.check_lint.outputs.lint_ok}
+        Types OK: ${steps.check_types.outputs.mypy_ok}
+
+        Files changed: ${steps.implement_feature.outputs.files_changed}
+
+        Ready to ship, or needs changes?
+      input_schema:
+        type: object
+        required: [decision]
+        properties:
+          decision:
+            type: string
+            enum: [ship_it, revise]
+          notes:
+            type: string
+            description: Any final notes or change requests
+      transitions:
+        - when: ${event.decision == "ship_it"}
+          next: done
+        - when: ${event.decision == "revise"}
+          next: needs_revision
+
+    # ── Terminal States ─────────────────────────────────────
+    - id: done
+      kind: end
+      result:
+        status: complete
+        feature: ${inputs.feature_name}
+        message: Feature implemented, tested, and approved. Ready to commit.
+
+    - id: needs_revision
+      kind: end
+      result:
+        status: needs_revision
+        feature: ${inputs.feature_name}
+        message: Sent back for revision. Update and re-run.
+
+    - id: cancelled
+      kind: end
+      result:
+        status: cancelled
+        feature: ${inputs.feature_name}
+        message: Feature development cancelled.
+
+    # ── Spike Branch ────────────────────────────────────────
+    - id: spike
+      kind: cli
+      name: "Agent: Run Feasibility Spike"
+      command: >-
+        echo '{"complete":true,
+        "feature":"${inputs.feature_name}",
+        "findings":"Spike explored feasibility of ${inputs.feature_name} in ${inputs.area}",
+        "recommendation":"Proceed with minimal scope first",
+        "estimated_effort":"2-3 days"}'
+      outputs:
+        type: object
+        required: [complete, findings]
+        properties:
+          complete: { type: boolean }
+          feature: { type: string }
+          findings: { type: string }
+          recommendation: { type: string }
+          estimated_effort: { type: string }
+
+    - id: spike_review
+      kind: await_event
+      name: "Human: Review Spike"
+      audience: user
+      event_name: spike_decision
+      prompt: |
+        Spike complete for "${inputs.feature_name}".
+
+        Findings: ${steps.spike.outputs.findings}
+        Recommendation: ${steps.spike.outputs.recommendation}
+        Estimated effort: ${steps.spike.outputs.estimated_effort}
+
+        Promote to full development or shelve?
+      input_schema:
+        type: object
+        required: [action]
+        properties:
+          action:
+            type: string
+            enum: [promote, shelve]
+      transitions:
+        - when: ${event.action == "promote"}
+          next: spike_promoted
+        - when: ${event.action == "shelve"}
+          next: shelved
+
+    - id: spike_promoted
+      kind: end
+      result:
+        status: spike_promoted
+        feature: ${inputs.feature_name}
+        message: Spike validated. Re-run with scope full or minimal to implement.
+
+    - id: shelved
+      kind: end
+      result:
+        status: shelved
+        feature: ${inputs.feature_name}
+        message: Feature shelved for later.

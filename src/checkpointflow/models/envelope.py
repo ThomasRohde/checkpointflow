@@ -44,6 +44,8 @@ class Envelope(BaseModel):
     exit_code: int | None = None
     run_id: str | None = None
     workflow_id: str | None = None
+    workflow_name: str | None = None
+    workflow_description: str | None = None
     workflow_version: str | None = None
     current_step_id: str | None = None
     checkpoint_id: str | None = None

@@ -1,12 +1,15 @@
 schema_version: checkpointflow/v1
 workflow:
   id: collaborative_feature_pipeline
-  name: Collaborative Feature Development Pipeline
+  name: Collaborative Feature Planning Pipeline
   version: 1.0.0
   description: >
-    Showcase workflow demonstrating agent-human collaboration through research,
-    parallel analysis, iterative decision-making, and dynamic branching.
-    Features every step kind: cli, await_event, switch, parallel, foreach, end.
+    End-to-end feature planning with agent-human collaboration. An agent
+    researches the feature idea, runs parallel analysis (feasibility, effort,
+    dependencies), then synthesizes findings. Humans set direction, make
+    architectural decisions, and give final sign-off. Supports fast-track
+    routing for critical features and research spikes for uncertain ones.
+    Demonstrates every step kind: cli, await_event, switch, parallel, foreach, end.
 
   defaults:
     shell: bash
@@ -17,14 +20,19 @@ workflow:
     properties:
       feature_idea:
         type: string
-        description: A rough description of the feature to develop
+        description: Rough description of the feature — the agent uses this to scope research and analysis
+        examples:
+          - "Real-time collaborative editing for documents"
+          - "Usage-based billing with Stripe metering"
+          - "SSO integration with SAML and OIDC providers"
       project_name:
         type: string
-        description: Name of the project this feature belongs to
+        description: Project this feature belongs to — used for tracking and artifact naming
+        examples: ["acme-platform", "internal-tools", "data-pipeline"]
       priority:
         type: string
         enum: [critical, normal, low]
-        description: Feature priority level (affects workflow routing)
+        description: Feature priority — critical triggers fast-track routing that skips parallel analysis
 
   steps:
     # ── Phase 1: Agent Research ──────────────────────────────

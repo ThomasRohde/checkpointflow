@@ -3,7 +3,9 @@ workflow:
   id: simple_echo
   name: Simple Echo
   version: 0.1.0
-  description: A minimal workflow that echoes a greeting and completes.
+  description: >
+    Minimal example workflow — takes a name as input, echoes a greeting,
+    and completes. Use this as a starting template or to verify cpf is working.
 
   inputs:
     type: object
@@ -11,6 +13,8 @@ workflow:
     properties:
       name:
         type: string
+        description: Name to include in the greeting
+        examples: ["Alice", "World", "checkpointflow"]
 
   steps:
     - id: greet

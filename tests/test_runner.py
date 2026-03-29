@@ -233,3 +233,36 @@ def test_run_envelope_has_workflow_id(tmp_path: Path) -> None:
     env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
     assert env.workflow_id == "test_wf"
     assert env.workflow_version == "1.0"
+
+
+def test_run_envelope_has_workflow_name_and_description(tmp_path: Path) -> None:
+    wf = tmp_path / "workflow.yaml"
+    wf.write_text("""\
+schema_version: checkpointflow/v1
+workflow:
+  id: named_wf
+  name: Named Workflow
+  description: A workflow with a name and description
+  version: "2.0"
+  inputs:
+    type: object
+  steps:
+    - id: done
+      kind: end
+""")
+    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+    assert env.ok is True
+    assert env.workflow_name == "Named Workflow"
+    assert env.workflow_description == "A workflow with a name and description"
+
+
+def test_run_envelope_omits_workflow_name_when_not_set(tmp_path: Path) -> None:
+    wf = _write_workflow(
+        tmp_path,
+        """\
+    - id: done
+      kind: end""",
+    )
+    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+    assert env.workflow_name is None
+    assert env.workflow_description is None

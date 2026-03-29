@@ -145,3 +145,47 @@ def test_inspect_run_not_found(tmp_path: Path) -> None:
     assert insp.ok is False
     assert insp.error is not None
     assert insp.error.code == "ERR_RUN_NOT_FOUND"
+
+
+def test_status_includes_workflow_name_and_description(tmp_path: Path) -> None:
+    wf = tmp_path / "workflow.yaml"
+    wf.write_text("""\
+schema_version: checkpointflow/v1
+workflow:
+  id: named_wf
+  name: Named Workflow
+  description: Has a description
+  version: "1.0"
+  inputs:
+    type: object
+  steps:
+    - id: done
+      kind: end
+""")
+    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+    assert env.run_id is not None
+    status = query_status(env.run_id, base_dir=tmp_path / "store")
+    assert status.workflow_name == "Named Workflow"
+    assert status.workflow_description == "Has a description"
+
+
+def test_inspect_includes_workflow_name_and_description(tmp_path: Path) -> None:
+    wf = tmp_path / "workflow.yaml"
+    wf.write_text("""\
+schema_version: checkpointflow/v1
+workflow:
+  id: named_wf
+  name: Named Workflow
+  description: Has a description
+  version: "1.0"
+  inputs:
+    type: object
+  steps:
+    - id: done
+      kind: end
+""")
+    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+    assert env.run_id is not None
+    insp = query_inspect(env.run_id, base_dir=tmp_path / "store")
+    assert insp.workflow_name == "Named Workflow"
+    assert insp.workflow_description == "Has a description"

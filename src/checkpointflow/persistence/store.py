@@ -15,6 +15,8 @@ _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     workflow_id TEXT NOT NULL,
+    workflow_name TEXT,
+    workflow_description TEXT,
     workflow_version TEXT,
     workflow_hash TEXT NOT NULL,
     workflow_path TEXT NOT NULL,
@@ -86,6 +88,16 @@ class Store:
 
     def _init_db(self) -> None:
         self._conn.executescript(_SCHEMA_SQL)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns that may be missing from older databases."""
+        cursor = self._conn.execute("PRAGMA table_info(runs)")
+        existing = {row[1] for row in cursor.fetchall()}
+        for col in ("workflow_name", "workflow_description"):
+            if col not in existing:
+                self._conn.execute(f"ALTER TABLE runs ADD COLUMN {col} TEXT")
+        self._conn.commit()
 
     def _now(self) -> str:
         return datetime.now(UTC).isoformat()
@@ -94,6 +106,8 @@ class Store:
         self,
         *,
         workflow_id: str,
+        workflow_name: str | None = None,
+        workflow_description: str | None = None,
         workflow_version: str | None,
         workflow_hash: str,
         workflow_path: str,
@@ -103,12 +117,15 @@ class Store:
         now = self._now()
         self._conn.execute(
             """INSERT INTO runs
-               (run_id, workflow_id, workflow_version, workflow_hash,
+               (run_id, workflow_id, workflow_name, workflow_description,
+                workflow_version, workflow_hash,
                 workflow_path, inputs_json, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id,
                 workflow_id,
+                workflow_name,
+                workflow_description,
                 workflow_version,
                 workflow_hash,
                 workflow_path,

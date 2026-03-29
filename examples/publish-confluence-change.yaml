@@ -1,8 +1,11 @@
 schema_version: checkpointflow/v1
 workflow:
   id: publish_confluence_change
-  name: Publish Confluence change
-  description: Plan, approve, and apply a page update.
+  name: Publish Confluence Page Update
+  description: >
+    Plans a Confluence page update from a local source file, pauses for
+    human review of the diff and risk level, then applies or rejects.
+    Uses confpub CLI for planning and applying changes.
   version: 0.1.0
   defaults:
     shell: bash
@@ -13,8 +16,12 @@ workflow:
     properties:
       page_id:
         type: string
+        description: Confluence page ID to update
+        examples: ["12345678", "98765432"]
       source_file:
         type: string
+        description: Local file containing the updated page content
+        examples: ["docs/architecture.md", "release-notes/v2.0.md"]
 
   steps:
     - id: plan

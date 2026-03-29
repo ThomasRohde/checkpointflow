@@ -48,3 +48,11 @@ def test_validate_example_workflow() -> None:
         data = yaml.safe_load(f)
     errors = validate_workflow_document(data)
     assert errors == [], f"Example workflow should validate cleanly: {errors}"
+
+
+def test_validate_cpf_feature_development_workflow() -> None:
+    example = Path("examples/cpf_feature_development.yaml")
+    with example.open() as f:
+        data = yaml.safe_load(f)
+    errors = validate_workflow_document(data)
+    assert errors == [], f"Feature development workflow should validate cleanly: {errors}"

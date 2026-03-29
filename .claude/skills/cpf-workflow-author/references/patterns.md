@@ -23,11 +23,17 @@ workflow:
   id: deploy_pipeline
   name: Deploy Pipeline
   version: 0.1.0
+  description: >
+    Builds, tests, and deploys to the target environment in sequence.
+    No human approval gates — use for trusted environments like dev/staging.
   inputs:
     type: object
     required: [environment]
     properties:
-      environment: { type: string }
+      environment:
+        type: string
+        description: Target deployment environment — determines config and secrets
+        examples: ["staging", "production", "dev"]
 
   steps:
     - id: build

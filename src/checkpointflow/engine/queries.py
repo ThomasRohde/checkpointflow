@@ -35,6 +35,8 @@ def query_status(
     kwargs: dict[str, Any] = {
         "run_id": run_id,
         "workflow_id": run["workflow_id"],
+        "workflow_name": run.get("workflow_name"),
+        "workflow_description": run.get("workflow_description"),
         "workflow_version": run["workflow_version"],
         "current_step_id": run["current_step_id"],
     }
@@ -148,6 +150,8 @@ def query_inspect(
         exit_code=_status_to_exit_code(status),
         run_id=run_id,
         workflow_id=run["workflow_id"],
+        workflow_name=run.get("workflow_name"),
+        workflow_description=run.get("workflow_description"),
         workflow_version=run["workflow_version"],
         current_step_id=run["current_step_id"],
         result=detail,

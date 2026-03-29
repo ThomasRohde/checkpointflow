@@ -45,7 +45,9 @@ workflow:
   id: snake_case_identifier
   name: Human Readable Name
   version: 0.1.0
-  description: One-line description of what this workflow does.
+  description: >
+    A clear description of what this workflow does, why it exists,
+    and what the user/agent will experience when running it.
 
   inputs:
     type: object
@@ -53,6 +55,8 @@ workflow:
     properties:
       field_name:
         type: string
+        description: What this field is for and how it will be used
+        examples: ["realistic-value-1", "realistic-value-2"]
 
   steps:
     - id: first_step
@@ -71,6 +75,45 @@ Key rules:
 - `workflow.inputs` uses JSON Schema to define what the caller must provide
 - Every step needs a unique `id`
 - Steps execute sequentially unless a transition jumps elsewhere
+
+### Writing great names and descriptions
+
+The `name` and `description` fields are emitted in every JSON envelope at runtime. When an agent runs or resumes this workflow, these are the **only context it has** about what the workflow does — it may not have read the YAML file. Write them as if they are the briefing for an agent that knows nothing else.
+
+**`name`** — a short, specific title that tells the agent what process it is driving. Avoid generic names like "Build Pipeline" or "Review Flow". Instead, be specific: "PR Review with Security Gate", "TDD Feature Development for CPF".
+
+**`description`** — a 1-3 sentence explanation that covers:
+1. What the workflow does end-to-end (the happy path)
+2. Who is involved (human approvals? agent steps? parallel checks?)
+3. What methodology or constraints it follows (e.g. "TDD: tests first, then implementation")
+
+Bad: `description: A workflow for deployments.`
+Good: `description: >
+  Deploys a service to production with a two-phase rollout. An agent runs
+  pre-deploy checks (lint, test, canary), then pauses for human approval
+  before promoting to full traffic. Rolls back automatically on health check failure.`
+
+### Writing great input properties
+
+Input `description` and `examples` directly shape the UX when an agent or skill collects input from the user. The runner skill uses `examples` as selectable options in its prompt UI — without them, the agent has to guess what values look like.
+
+**Always include `examples`** on string inputs that don't have an `enum`. Provide 2-3 realistic values that illustrate the expected format:
+
+```yaml
+properties:
+  feature_name:
+    type: string
+    description: Short kebab-case name for the feature
+    examples: ["run-delete", "gui-filter", "batch-resume"]
+  target_url:
+    type: string
+    description: The URL to deploy to
+    examples: ["https://staging.example.com", "https://prod.example.com"]
+```
+
+**`description`** on input properties should say what the value is *for*, not just what type it is. "The environment name" is worse than "Target deployment environment — determines which config and secrets are loaded."
+
+For `enum` inputs, `examples` are unnecessary — the enum values themselves become the options. But write a clear `description` explaining what each choice means if it's not obvious from the value names.
 
 ## Step kinds
 

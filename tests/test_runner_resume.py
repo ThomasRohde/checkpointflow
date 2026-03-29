@@ -223,8 +223,8 @@ def test_resume_with_transitions_reject(tmp_path: Path) -> None:
     assert env.result["status"] == "rejected"
 
 
-def test_resume_no_transition_match_errors(tmp_path: Path) -> None:
-    # Use a workflow where the event validates but no transition matches
+def test_resume_no_transition_match_falls_through(tmp_path: Path) -> None:
+    """When no transition matches, fall through to the next step in the array."""
     wf = tmp_path / "workflow.yaml"
     wf.write_text("""\
 schema_version: checkpointflow/v1
@@ -245,12 +245,71 @@ workflow:
       transitions:
         - when: ${event.x == "a"}
           next: done
+    - id: fallthrough
+      kind: cli
+      command: echo fell through
     - id: done
       kind: end
 """)
     run_id = _run_to_waiting(tmp_path, wf)
     env = resume_workflow(run_id, "ev", '{"x":"b"}', base_dir=tmp_path / "store")
-    assert env.ok is False
+    assert env.ok is True
+    assert env.status == "completed"
+
+
+def test_run_waiting_envelope_has_workflow_name(tmp_path: Path) -> None:
+    wf = tmp_path / "workflow.yaml"
+    wf.write_text("""\
+schema_version: checkpointflow/v1
+workflow:
+  id: named_wf
+  name: Named Workflow
+  description: A workflow with metadata
+  inputs:
+    type: object
+  steps:
+    - id: wait
+      kind: await_event
+      audience: user
+      event_name: ev
+      input_schema:
+        type: object
+    - id: done
+      kind: end
+""")
+    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+    assert env.ok is True
+    assert env.status == "waiting"
+    assert env.workflow_name == "Named Workflow"
+    assert env.workflow_description == "A workflow with metadata"
+
+
+def test_resume_envelope_has_workflow_name(tmp_path: Path) -> None:
+    wf = tmp_path / "workflow.yaml"
+    wf.write_text("""\
+schema_version: checkpointflow/v1
+workflow:
+  id: named_wf
+  name: Named Workflow
+  description: A workflow with metadata
+  inputs:
+    type: object
+  steps:
+    - id: wait
+      kind: await_event
+      audience: user
+      event_name: ev
+      input_schema:
+        type: object
+    - id: done
+      kind: end
+""")
+    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+    assert env.run_id is not None
+    env2 = resume_workflow(env.run_id, "ev", "{}", base_dir=tmp_path / "store")
+    assert env2.ok is True
+    assert env2.workflow_name == "Named Workflow"
+    assert env2.workflow_description == "A workflow with metadata"
 
 
 def test_resume_persists_event(tmp_path: Path) -> None:

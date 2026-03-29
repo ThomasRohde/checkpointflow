@@ -131,6 +131,12 @@ def _execute_steps(
     command: str,
 ) -> Envelope:
     """Execute a sequence of steps, returning an envelope on halt or completion."""
+    wf_meta: dict[str, Any] = {
+        "workflow_id": workflow.id,
+        "workflow_name": workflow.name,
+        "workflow_description": workflow.description,
+        "workflow_version": workflow.version,
+    }
     all_steps = list(workflow.steps)
     step_ids = [s.id for s in all_steps]
 
@@ -155,8 +161,7 @@ def _execute_steps(
                     message=f"Step '{step.id}' has invalid if-condition '{step.step_if}': {exc}",
                     exit_code=ExitCode.STEP_FAILED,
                     run_id=run_id,
-                    workflow_id=workflow.id,
-                    workflow_version=workflow.version,
+                    **wf_meta,
                     current_step_id=step.id,
                 )
 
@@ -197,8 +202,7 @@ def _execute_steps(
                 message=f"Step kind '{step.kind}' is not supported in this version.",
                 exit_code=ExitCode.UNSUPPORTED,
                 run_id=run_id,
-                workflow_id=workflow.id,
-                workflow_version=workflow.version,
+                **wf_meta,
             )
 
         # Persist step result
@@ -223,8 +227,7 @@ def _execute_steps(
                 message=result.error_message or f"Step '{step.id}' failed",
                 exit_code=ExitCode.STEP_FAILED,
                 run_id=run_id,
-                workflow_id=workflow.id,
-                workflow_version=workflow.version,
+                **wf_meta,
                 current_step_id=step.id,
             )
 
@@ -251,8 +254,7 @@ def _execute_steps(
                 status="waiting",
                 exit_code=ExitCode.WAITING,
                 run_id=run_id,
-                workflow_id=workflow.id,
-                workflow_version=workflow.version,
+                **wf_meta,
                 current_step_id=step.id,
                 wait=wait_detail,
             )
@@ -268,8 +270,7 @@ def _execute_steps(
             return Envelope.success(
                 command=command,
                 run_id=run_id,
-                workflow_id=workflow.id,
-                workflow_version=workflow.version,
+                **wf_meta,
                 current_step_id=step.id,
                 result=final_result if final_result else None,
             )
@@ -299,8 +300,7 @@ def _execute_steps(
     return Envelope.success(
         command=command,
         run_id=run_id,
-        workflow_id=workflow.id,
-        workflow_version=workflow.version,
+        **wf_meta,
     )
 
 
@@ -423,6 +423,8 @@ def _run_workflow_inner(
     workflow_hash = hashlib.sha256(raw_text.encode()).hexdigest()
     run_id = store.create_run(
         workflow_id=workflow.id,
+        workflow_name=workflow.name,
+        workflow_description=workflow.description,
         workflow_version=workflow.version,
         workflow_hash=workflow_hash,
         workflow_path=str(workflow_path.resolve()),
@@ -602,14 +604,8 @@ def _resume_workflow_inner(
                 )
 
         if next_step_id is None:
-            return Envelope.failure(
-                command="resume",
-                error_code=ErrorCode.ERR_STEP_FAILED,
-                message="No transition matched the event data.",
-                exit_code=ExitCode.STEP_FAILED,
-                run_id=run_id,
-                current_step_id=current_step_id,
-            )
+            # No transition matched — fall through to the next step in the array
+            next_step_id = step_ids[await_idx + 1] if await_idx + 1 < len(step_ids) else None
     else:
         # No transitions: proceed to next step in array
         next_step_id = step_ids[await_idx + 1] if await_idx + 1 < len(step_ids) else None
@@ -620,6 +616,8 @@ def _resume_workflow_inner(
             command="resume",
             run_id=run_id,
             workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            workflow_description=workflow.description,
             workflow_version=workflow.version,
         )
 
@@ -683,6 +681,8 @@ def cancel_run(
         exit_code=ExitCode.SUCCESS,
         run_id=run_id,
         workflow_id=run["workflow_id"],
+        workflow_name=run.get("workflow_name"),
+        workflow_description=run.get("workflow_description"),
         workflow_version=run["workflow_version"],
         result={"reason": reason},
     )
