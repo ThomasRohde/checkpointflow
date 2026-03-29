@@ -1,0 +1,122 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: project_health
+  name: Project health check
+  version: 1.0.0
+  description: >
+    Comprehensive project health check. Runs format, lint, type check,
+    and tests in parallel, then collects git stats and produces a report.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    required: [project_dir]
+    properties:
+      project_dir:
+        type: string
+        description: Absolute path to the repo root
+
+  steps:
+    - id: format_check
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        uv run ruff format --check . >/dev/null 2>&1 &&
+        echo '{"passed": true}' ||
+        echo '{"passed": false}'
+      success:
+        exit_codes: [0, 1]
+      outputs:
+        type: object
+        required: [passed]
+        properties:
+          passed: { type: boolean }
+
+    - id: lint_check
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        uv run ruff check . >/dev/null 2>&1 &&
+        echo '{"passed": true}' ||
+        echo '{"passed": false}'
+      success:
+        exit_codes: [0, 1]
+      outputs:
+        type: object
+        required: [passed]
+        properties:
+          passed: { type: boolean }
+
+    - id: type_check
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        uv run mypy >/dev/null 2>&1 &&
+        echo '{"passed": true}' ||
+        echo '{"passed": false}'
+      success:
+        exit_codes: [0, 1]
+      outputs:
+        type: object
+        required: [passed]
+        properties:
+          passed: { type: boolean }
+
+    - id: test_suite
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        output=$(uv run pytest -q --tb=no 2>&1);
+        rc=$?;
+        passed=$(echo "$output" | grep -oP '(\d+) passed' | grep -oP '\d+' || echo 0);
+        failed=$(echo "$output" | grep -oP '(\d+) failed' | grep -oP '\d+' || echo 0);
+        if [ $rc -eq 0 ]; then
+          echo "{\"passed_count\": $passed, \"failed_count\": $failed, \"passed\": true}";
+        else
+          echo "{\"passed_count\": $passed, \"failed_count\": $failed, \"passed\": false}";
+        fi
+      timeout_seconds: 300
+      success:
+        exit_codes: [0, 1]
+      outputs:
+        type: object
+        required: [passed]
+        properties:
+          passed: { type: boolean }
+          passed_count: { type: integer }
+          failed_count: { type: integer }
+
+    - id: git_stats
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        version=$(python scripts/get_version.py | python -c "import sys,json; print(json.load(sys.stdin)['version'])") &&
+        branch=$(git rev-parse --abbrev-ref HEAD) &&
+        uncommitted=$(git status --porcelain | wc -l | tr -d ' ') &&
+        last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "none") &&
+        commits_since=$(git rev-list --count $last_tag..HEAD 2>/dev/null || echo 0) &&
+        echo "{\"version\": \"$version\", \"branch\": \"$branch\", \"uncommitted_files\": $uncommitted, \"last_tag\": \"$last_tag\", \"commits_since_tag\": $commits_since}"
+      outputs:
+        type: object
+        required: [version, branch]
+        properties:
+          version: { type: string }
+          branch: { type: string }
+          uncommitted_files: { type: integer }
+          last_tag: { type: string }
+          commits_since_tag: { type: integer }
+
+    - id: done
+      kind: end
+      result:
+        version: ${steps.git_stats.outputs.version}
+        branch: ${steps.git_stats.outputs.branch}
+        uncommitted_files: ${steps.git_stats.outputs.uncommitted_files}
+        last_tag: ${steps.git_stats.outputs.last_tag}
+        commits_since_tag: ${steps.git_stats.outputs.commits_since_tag}
+        format: ${steps.format_check.outputs.passed}
+        lint: ${steps.lint_check.outputs.passed}
+        types: ${steps.type_check.outputs.passed}
+        tests: ${steps.test_suite.outputs.passed}

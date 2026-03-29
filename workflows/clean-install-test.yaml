@@ -1,0 +1,91 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: clean_install_test
+  name: Clean install test
+  version: 1.0.0
+  description: >
+    Verifies the package installs cleanly from PyPI and the CLI works.
+    Useful after a release to confirm the published artifact is functional.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    properties:
+      package:
+        type: string
+        description: Package name on PyPI (default checkpointflow)
+      expected_version:
+        type: string
+        description: Expected version string to verify
+
+  steps:
+    - id: create_venv
+      kind: cli
+      command: >
+        venv_dir=$(mktemp -d)/cpf-test &&
+        uv venv "$venv_dir" --quiet &&
+        echo "{\"venv\": \"$venv_dir\"}"
+      outputs:
+        type: object
+        required: [venv]
+        properties:
+          venv: { type: string }
+
+    - id: pip_install
+      kind: cli
+      command: >
+        pkg="${inputs.package:-checkpointflow}" &&
+        uv pip install "$pkg[gui]" --quiet --python ${steps.create_venv.outputs.venv}/bin/python &&
+        echo "{\"installed\": \"$pkg\"}"
+      timeout_seconds: 60
+      outputs:
+        type: object
+        required: [installed]
+        properties:
+          installed: { type: string }
+
+    - id: verify_cli
+      kind: cli
+      command: >
+        version=$(${steps.create_venv.outputs.venv}/bin/cpf --version) &&
+        help_ok=$(${steps.create_venv.outputs.venv}/bin/cpf --help >/dev/null 2>&1 && echo true || echo false) &&
+        guide_ok=$(${steps.create_venv.outputs.venv}/bin/cpf guide >/dev/null 2>&1 && echo true || echo false) &&
+        echo "{\"version\": \"$version\", \"help\": $help_ok, \"guide\": $guide_ok}"
+      outputs:
+        type: object
+        required: [version]
+        properties:
+          version: { type: string }
+          help: { type: boolean }
+          guide: { type: boolean }
+
+    - id: check_version
+      kind: switch
+      cases:
+        - when: 'inputs.expected_version == ""'
+          next: cleanup
+        - when: 'steps.verify_cli.outputs.version == inputs.expected_version'
+          next: cleanup
+      default: version_mismatch
+
+    - id: version_mismatch
+      kind: end
+      result:
+        status: failed
+        reason: >
+          Expected version ${inputs.expected_version} but got
+          ${steps.verify_cli.outputs.version}
+
+    - id: cleanup
+      kind: cli
+      command: rm -rf ${steps.create_venv.outputs.venv}
+
+    - id: done
+      kind: end
+      result:
+        status: passed
+        version: ${steps.verify_cli.outputs.version}
+        help: ${steps.verify_cli.outputs.help}
+        guide: ${steps.verify_cli.outputs.guide}

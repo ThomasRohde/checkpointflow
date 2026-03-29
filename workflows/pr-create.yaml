@@ -1,0 +1,122 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: pr_create
+  name: Create pull request
+  version: 1.0.0
+  description: >
+    Run the quality gate, show what changed, collect PR details
+    from the user, push, and create the PR via gh CLI.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    required: [project_dir]
+    properties:
+      project_dir:
+        type: string
+        description: Absolute path to the repo root
+      base_branch:
+        type: string
+        description: "Base branch for the PR (default: master)"
+
+  steps:
+    - id: check_branch
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        branch=$(git rev-parse --abbrev-ref HEAD) &&
+        base=${inputs.base_branch:-master} &&
+        if [ "$branch" = "$base" ]; then
+          echo '{"error": "Cannot create PR from the base branch"}' && exit 1
+        fi &&
+        ahead=$(git rev-list --count $base..HEAD) &&
+        echo "{\"branch\": \"$branch\", \"base\": \"$base\", \"commits_ahead\": $ahead}"
+      outputs:
+        type: object
+        required: [branch, base, commits_ahead]
+        properties:
+          branch: { type: string }
+          base: { type: string }
+          commits_ahead: { type: integer }
+
+    - id: quality_gate
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        uv run ruff format --check . &&
+        uv run ruff check . &&
+        uv run mypy &&
+        uv run pytest -q
+      timeout_seconds: 300
+
+    - id: diff_summary
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        echo "{" &&
+        echo "\"files_changed\": $(git diff --name-only ${steps.check_branch.outputs.base}..HEAD | wc -l | tr -d ' ')," &&
+        echo "\"insertions\": $(git diff --stat ${steps.check_branch.outputs.base}..HEAD | tail -1 | grep -oP '\d+ insertion' | grep -oP '\d+' || echo 0)," &&
+        echo "\"deletions\": $(git diff --stat ${steps.check_branch.outputs.base}..HEAD | tail -1 | grep -oP '\d+ deletion' | grep -oP '\d+' || echo 0)," &&
+        echo "\"log\": $(git log --oneline ${steps.check_branch.outputs.base}..HEAD | head -20 | python -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))')" &&
+        echo "}"
+      outputs:
+        type: object
+        properties:
+          files_changed: { type: integer }
+          insertions: { type: integer }
+          deletions: { type: integer }
+          log: { type: string }
+
+    - id: collect_pr_details
+      kind: await_event
+      audience: agent
+      event_name: pr_details
+      prompt: >
+        Quality gate passed. Branch ${steps.check_branch.outputs.branch} is
+        ${steps.check_branch.outputs.commits_ahead} commits ahead of
+        ${steps.check_branch.outputs.base}.
+
+        Commit log:
+        ${steps.diff_summary.outputs.log}
+
+        Provide a PR title and body.
+      input_schema:
+        type: object
+        required: [title, body]
+        properties:
+          title:
+            type: string
+            description: Short PR title (under 72 chars)
+          body:
+            type: string
+            description: PR description in markdown
+
+    - id: push_branch
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: git push -u origin ${steps.check_branch.outputs.branch}
+      timeout_seconds: 120
+
+    - id: create_pr
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        gh pr create
+        --base ${steps.check_branch.outputs.base}
+        --title "${steps.collect_pr_details.outputs.title}"
+        --body "${steps.collect_pr_details.outputs.body}"
+        --json url
+      outputs:
+        type: object
+        required: [url]
+        properties:
+          url: { type: string }
+
+    - id: done
+      kind: end
+      result:
+        status: created
+        url: ${steps.create_pr.outputs.url}
+        branch: ${steps.check_branch.outputs.branch}

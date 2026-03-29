@@ -1,0 +1,140 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: dependency_update
+  name: Update dependencies
+  version: 1.0.0
+  description: >
+    Check for outdated dependencies, show what's available, let the user
+    decide what to update, apply updates, run the quality gate, and commit.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    required: [project_dir]
+    properties:
+      project_dir:
+        type: string
+        description: Absolute path to the repo root
+
+  steps:
+    - id: check_outdated
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        uv pip list --outdated --format json 2>/dev/null |
+        python -c "
+        import sys, json
+        deps = json.load(sys.stdin)
+        print(json.dumps({
+          'count': len(deps),
+          'packages': [{'name': d['name'], 'current': d['version'], 'latest': d['latest_version']} for d in deps],
+          'summary': ', '.join(f\"{d['name']} {d['version']}→{d['latest_version']}\" for d in deps) or 'all up to date'
+        }))
+        "
+      outputs:
+        type: object
+        required: [count, summary]
+        properties:
+          count: { type: integer }
+          summary: { type: string }
+          packages: { type: array }
+
+    - id: decide
+      kind: switch
+      cases:
+        - when: 'steps.check_outdated.outputs.count == 0'
+          next: up_to_date
+      default: review_updates
+
+    - id: review_updates
+      kind: await_event
+      audience: user
+      event_name: update_decision
+      prompt: >
+        ${steps.check_outdated.outputs.count} outdated package(s):
+        ${steps.check_outdated.outputs.summary}
+
+        Update all, or skip?
+      input_schema:
+        type: object
+        required: [action]
+        properties:
+          action:
+            type: string
+            enum: [update_all, skip]
+      transitions:
+        - when: ${event.action == "update_all"}
+          next: run_update
+        - when: ${event.action == "skip"}
+          next: skipped
+
+    - id: run_update
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: uv lock --upgrade && uv sync --group dev
+      timeout_seconds: 120
+
+    - id: quality_gate
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        uv run ruff format --check . &&
+        uv run ruff check . &&
+        uv run mypy &&
+        uv run pytest -q
+      timeout_seconds: 300
+
+    - id: confirm_commit
+      kind: await_event
+      audience: user
+      event_name: commit_decision
+      prompt: >
+        Dependencies updated and quality gate passed. Commit the lockfile changes?
+      input_schema:
+        type: object
+        required: [commit]
+        properties:
+          commit:
+            type: string
+            enum: ["yes", "no"]
+      transitions:
+        - when: ${event.commit == "yes"}
+          next: commit_changes
+        - when: ${event.commit == "no"}
+          next: rollback
+
+    - id: commit_changes
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: >
+        git add uv.lock &&
+        git commit -m "Update dependencies"
+      timeout_seconds: 120
+
+    - id: updated
+      kind: end
+      result:
+        status: updated
+        packages: ${steps.check_outdated.outputs.count}
+
+    - id: rollback
+      kind: cli
+      cwd: ${inputs.project_dir}
+      command: git checkout -- uv.lock && uv sync --group dev
+
+    - id: rolled_back
+      kind: end
+      result:
+        status: rolled_back
+
+    - id: up_to_date
+      kind: end
+      result:
+        status: up_to_date
+
+    - id: skipped
+      kind: end
+      result:
+        status: skipped
