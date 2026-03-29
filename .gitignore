@@ -11,3 +11,4 @@ build/
 .checkpointflow/
 gui/node_modules/
 gui/dist/
+screenshots/

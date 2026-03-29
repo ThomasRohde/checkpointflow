@@ -1,0 +1,86 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: cpf_quiz
+  name: checkpointflow Quiz
+  version: 0.1.0
+  description: A three-question quiz to test your knowledge of checkpointflow.
+
+  inputs:
+    type: object
+    properties: {}
+
+  steps:
+    - id: welcome
+      kind: cli
+      command: echo "Welcome to the checkpointflow quiz! You will be asked 3 questions."
+
+    - id: q1
+      kind: await_event
+      audience: user
+      event_name: q1_answer
+      prompt: "What exit code does cpf return when a workflow is waiting for external input? a) 0  b) 30  c) 40  d) 50"
+      input_schema:
+        type: object
+        required: [answer]
+        properties:
+          answer:
+            type: string
+            enum: [a, b, c, d]
+      transitions:
+        - when: ${event.answer == "c"}
+          next: q2
+        - when: ${event.answer != "c"}
+          next: q1_feedback
+
+    - id: q1_feedback
+      kind: cli
+      command: echo "Not quite — exit code 40 means waiting for input. 0 is success, 30 is step failed, 50 is cancelled."
+
+    - id: q2
+      kind: await_event
+      audience: user
+      event_name: q2_answer
+      prompt: "Which step kind pauses execution and waits for external input? a) cli  b) end  c) switch  d) await_event"
+      input_schema:
+        type: object
+        required: [answer]
+        properties:
+          answer:
+            type: string
+            enum: [a, b, c, d]
+      transitions:
+        - when: ${event.answer == "d"}
+          next: q3
+        - when: ${event.answer != "d"}
+          next: q2_feedback
+
+    - id: q2_feedback
+      kind: cli
+      command: echo "The answer is await_event — it pauses execution and exits with code 40 until resumed."
+
+    - id: q3
+      kind: await_event
+      audience: user
+      event_name: q3_answer
+      prompt: "What field in the JSON envelope tells you whether a command succeeded? a) status  b) exit_code  c) ok  d) result"
+      input_schema:
+        type: object
+        required: [answer]
+        properties:
+          answer:
+            type: string
+            enum: [a, b, c, d]
+      transitions:
+        - when: ${event.answer == "c"}
+          next: done
+        - when: ${event.answer != "c"}
+          next: q3_feedback
+
+    - id: q3_feedback
+      kind: cli
+      command: echo "The answer is ok — it is always true on success and false on failure."
+
+    - id: done
+      kind: end
+      result:
+        message: "Quiz complete! You are a checkpointflow expert."

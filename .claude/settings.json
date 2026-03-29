@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import sys,json,subprocess; data=json.load(sys.stdin); fp=data.get('tool_input',{}).get('file_path') or data.get('tool_response',{}).get('filePath',''); fp.endswith('.py') and subprocess.run(['uv','run','ruff','format',fp])\" 2>/dev/null || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

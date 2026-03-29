@@ -1,0 +1,23 @@
+{
+  "skill_name": "cpf-workflow-author",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "I need a workflow that runs database backup, asks someone to verify the backup looks good, then either archives it or retries",
+      "expected_output": "A valid checkpointflow YAML with cli steps for backup, an await_event for verification, and transitions branching to archive or retry paths",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "Create a cpf workflow that lints and tests my code, and only deploys if the user passes deploy: true in the inputs",
+      "expected_output": "A valid checkpointflow YAML with cli steps for lint and test, a conditional deploy step using if: inputs.deploy == \"true\", and an end step",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Make me a workflow for collecting feedback from 3 reviewers one at a time, then summarizing",
+      "expected_output": "A valid checkpointflow YAML with three sequential await_event steps for each reviewer, a cli step to summarize, and an end step",
+      "files": []
+    }
+  ]
+}
