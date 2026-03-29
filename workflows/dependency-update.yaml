@@ -22,17 +22,7 @@ workflow:
     - id: check_outdated
       kind: cli
       cwd: ${inputs.project_dir}
-      command: >
-        uv pip list --outdated --format json 2>/dev/null |
-        python -c "
-        import sys, json
-        deps = json.load(sys.stdin)
-        print(json.dumps({
-          'count': len(deps),
-          'packages': [{'name': d['name'], 'current': d['version'], 'latest': d['latest_version']} for d in deps],
-          'summary': ', '.join(f\"{d['name']} {d['version']}→{d['latest_version']}\" for d in deps) or 'all up to date'
-        }))
-        "
+      command: "uv pip list --outdated --format json 2>/dev/null | python -c \"import sys,json;deps=json.load(sys.stdin);print(json.dumps({'count':len(deps),'packages':[{'name':d['name'],'current':d['version'],'latest':d['latest_version']} for d in deps],'summary':', '.join(d['name']+' '+d['version']+'->'+d['latest_version'] for d in deps) or 'all up to date'}))\""
       outputs:
         type: object
         required: [count, summary]
@@ -110,8 +100,14 @@ workflow:
       cwd: ${inputs.project_dir}
       command: >
         git add uv.lock &&
-        git commit -m "Update dependencies"
+        git diff --cached --quiet &&
+        echo '{"committed": false, "reason": "no lockfile changes"}' ||
+        (git commit -m "Update dependencies" && echo '{"committed": true}')
       timeout_seconds: 120
+      outputs:
+        type: object
+        properties:
+          committed: { type: boolean }
 
     - id: updated
       kind: end
