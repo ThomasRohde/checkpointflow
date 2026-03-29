@@ -2,7 +2,7 @@ schema_version: checkpointflow/v1
 workflow:
   id: agent_decision
   name: Agent Analysis with Human Review
-  version: 0.1.0
+  version: 0.2.0
   description: >
     An agent analyzes a data source, then pauses for human review.
     The human can approve (which applies the changes) or request revisions.
@@ -19,14 +19,38 @@ workflow:
 
   steps:
     - id: analyze
-      kind: cli
-      command: echo "Analyzing ${inputs.data_source}"
+      kind: await_event
+      audience: agent
+      event_name: analysis
+      name: "Agent: Analyze Data Source"
+      prompt: |
+        Analyze the data source "${inputs.data_source}".
+
+        Investigate the data, identify patterns, anomalies, and
+        key insights. Summarize your findings.
+      input_schema:
+        type: object
+        required: [summary]
+        properties:
+          summary: { type: string, description: Summary of the analysis }
+          findings:
+            type: array
+            items: { type: string }
+            description: Key findings from the analysis
+          recommendation: { type: string }
 
     - id: review
       kind: await_event
       audience: user
       event_name: review_decision
-      prompt: Review the analysis and approve or request changes.
+      prompt: |
+        Analysis of "${inputs.data_source}" complete.
+
+        Summary: ${steps.analyze.outputs.summary}
+        Findings: ${steps.analyze.outputs.findings}
+        Recommendation: ${steps.analyze.outputs.recommendation}
+
+        Approve to apply the changes, or request revisions.
       input_schema:
         type: object
         required: [action]
@@ -43,8 +67,23 @@ workflow:
           next: revision_needed
 
     - id: apply
-      kind: cli
-      command: echo "Applying approved changes"
+      kind: await_event
+      audience: agent
+      event_name: changes_applied
+      name: "Agent: Apply Approved Changes"
+      prompt: |
+        The analysis of "${inputs.data_source}" was approved.
+
+        Apply the recommended changes based on the analysis:
+        ${steps.analyze.outputs.recommendation}
+
+        Report what was done.
+      input_schema:
+        type: object
+        required: [applied]
+        properties:
+          applied: { type: boolean }
+          details: { type: string }
 
     - id: complete
       kind: end
