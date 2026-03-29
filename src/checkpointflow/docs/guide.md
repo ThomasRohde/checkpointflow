@@ -129,15 +129,121 @@ Optional fields:
     page_url: ${steps.apply.outputs.page_url}
 ```
 
-### Planned step kinds (not yet supported at runtime)
+### api (supported)
 
-The following step kinds are defined in the schema but not yet implemented. They will return exit code 80 (`ERR_UNSUPPORTED_STEP`) if encountered during `cpf run`. The `api` and `workflow` kinds pass `cpf validate`; the others may require exact schema compliance.
+Makes an HTTP request and captures the response as step outputs.
 
-- **api** — HTTP call. Required: `method`, `url`.
-- **workflow** — subflow invocation. Required: `workflow_ref`.
-- **switch** — conditional branching. Required: `cases` (array of `{when, next}`).
-- **foreach** — iteration. Required: `items`, plus `body` or `workflow_ref`.
-- **parallel** — concurrent branches. Required: `branches` (array of `{start_at}`).
+Required fields: `id`, `kind: api`, `method`, `url`
+
+Optional fields:
+- `headers` — key-value map of request headers
+- `body` — request body (sent as JSON). Supports `${...}` interpolation in string values.
+- `success` — custom success criteria. `status_codes` is a list of HTTP status codes treated as success (default: `[200, 201, 204]`).
+- `timeout_seconds` — request timeout (default: 30)
+
+The response body is parsed as JSON if possible and exposed as step outputs. Non-JSON responses are wrapped as `{"body": "<text>"}`.
+
+```yaml
+- id: fetch_status
+  kind: api
+  method: GET
+  url: ${inputs.api_base}/status
+  headers:
+    Authorization: Bearer ${inputs.token}
+  success:
+    status_codes: [200]
+```
+
+### switch (supported)
+
+Evaluates conditions and jumps to the first matching step. Acts as a conditional branch point.
+
+Required fields: `id`, `kind: switch`, `cases`
+
+Optional fields:
+- `default` — step ID to jump to when no case matches
+
+Each case has `when` (expression) and `next` (target step ID). Cases are evaluated in order; the first match wins.
+
+```yaml
+- id: decide
+  kind: switch
+  cases:
+    - when: 'inputs.mode == "fast"'
+      next: fast_path
+    - when: 'inputs.mode == "safe"'
+      next: safe_path
+  default: fallback
+```
+
+### foreach (supported)
+
+Iterates over a list and executes body steps for each item. Within body steps, `${item}` refers to the current element and `${item_index}` to its zero-based index.
+
+Required fields: `id`, `kind: foreach`, `items`
+
+Required (one of): `body` (inline step definitions) or `workflow_ref` (sub-workflow path)
+
+Body steps currently support `cli` and `end` kinds.
+
+```yaml
+- id: process_files
+  kind: foreach
+  items: inputs.files
+  body:
+    - id: convert
+      kind: cli
+      command: convert ${item} --output out_${item_index}.pdf
+```
+
+### parallel (supported)
+
+Executes multiple branches concurrently using threads. Each branch references an existing step ID in the workflow via `start_at`. Outputs from all branches are merged into a single object keyed by step ID.
+
+Required fields: `id`, `kind: parallel`, `branches`
+
+Each branch has a `start_at` field pointing to a `cli` or `end` step in the workflow. All branches must succeed for the parallel step to succeed.
+
+```yaml
+- id: par
+  kind: parallel
+  branches:
+    - start_at: lint
+    - start_at: test
+    - start_at: typecheck
+
+- id: lint
+  kind: cli
+  command: ruff check .
+
+- id: test
+  kind: cli
+  command: pytest
+
+- id: typecheck
+  kind: cli
+  command: mypy
+```
+
+### workflow (supported)
+
+Invokes another workflow YAML file as a sub-workflow. The sub-workflow runs inline with its own inputs and step namespace. Outputs from the sub-workflow (or its `end` step result) become this step's outputs.
+
+Required fields: `id`, `kind: workflow`, `workflow_ref`
+
+Optional fields:
+- `inputs` — input mapping passed to the sub-workflow. Values support `${...}` interpolation.
+
+Sub-workflow steps currently support `cli` and `end` kinds.
+
+```yaml
+- id: deploy
+  kind: workflow
+  workflow_ref: ./deploy-workflow.yaml
+  inputs:
+    version: ${steps.build.outputs.version}
+    environment: ${inputs.target_env}
+```
 
 ## Common step fields
 

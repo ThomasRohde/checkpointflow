@@ -21,8 +21,11 @@ def _ctx(tmp_path: Path, **kwargs: Any) -> RunContext:
     )
 
 
-def _make_cli_step(step_id: str, command: str) -> CliStep:
-    return CliStep.model_validate({"id": step_id, "kind": "cli", "command": command})
+def _make_cli_step(step_id: str, command: str, *, shell: str | None = None) -> CliStep:
+    data: dict[str, Any] = {"id": step_id, "kind": "cli", "command": command}
+    if shell:
+        data["shell"] = shell
+    return CliStep.model_validate(data)
 
 
 def test_parallel_runs_branches(tmp_path: Path) -> None:
@@ -37,8 +40,8 @@ def test_parallel_runs_branches(tmp_path: Path) -> None:
         }
     )
     workflow_steps = [
-        _make_cli_step("a", 'echo \'{"from": "a"}\''),
-        _make_cli_step("b", 'echo \'{"from": "b"}\''),
+        _make_cli_step("a", 'echo \'{"from": "a"}\'', shell="bash"),
+        _make_cli_step("b", 'echo \'{"from": "b"}\'', shell="bash"),
     ]
     result = execute(step, _ctx(tmp_path), workflow_steps=workflow_steps)
     assert result.success is True
@@ -94,8 +97,8 @@ def test_parallel_merges_outputs(tmp_path: Path) -> None:
         }
     )
     workflow_steps = [
-        _make_cli_step("x", "echo '{\"val\": 1}'"),
-        _make_cli_step("y", "echo '{\"val\": 2}'"),
+        _make_cli_step("x", "echo '{\"val\": 1}'", shell="bash"),
+        _make_cli_step("y", "echo '{\"val\": 2}'", shell="bash"),
     ]
     result = execute(step, _ctx(tmp_path), workflow_steps=workflow_steps)
     assert result.success is True

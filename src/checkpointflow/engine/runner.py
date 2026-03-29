@@ -147,9 +147,18 @@ def _execute_steps(
                 if not evaluate_condition(condition, eval_ctx):
                     idx += 1
                     continue
-            except EvaluatorError:
-                idx += 1
-                continue
+            except EvaluatorError as exc:
+                store.update_run(run_id, status="failed")
+                return Envelope.failure(
+                    command=command,
+                    error_code=ErrorCode.ERR_STEP_FAILED,
+                    message=f"Step '{step.id}' has invalid if-condition '{step.step_if}': {exc}",
+                    exit_code=ExitCode.STEP_FAILED,
+                    run_id=run_id,
+                    workflow_id=workflow.id,
+                    workflow_version=workflow.version,
+                    current_step_id=step.id,
+                )
 
         # Update run status
         with contextlib.suppress(PersistenceError):
@@ -355,6 +364,21 @@ def _run_workflow_inner(
     doc = WorkflowDocument.model_validate(doc_dict)
     workflow = doc.workflow
 
+    # --- Check for duplicate step IDs ---
+    seen_ids: set[str] = set()
+    duplicate_ids: list[str] = []
+    for step in workflow.steps:
+        if step.id in seen_ids:
+            duplicate_ids.append(step.id)
+        seen_ids.add(step.id)
+    if duplicate_ids:
+        return Envelope.failure(
+            command="run",
+            error_code=ErrorCode.ERR_DUPLICATE_STEP_ID,
+            message=f"Duplicate step ID(s): {', '.join(duplicate_ids)}",
+            exit_code=ExitCode.VALIDATION_ERROR,
+        )
+
     # --- Parse and validate input ---
     try:
         inputs = _parse_input(input_raw)
@@ -514,7 +538,7 @@ def _resume_workflow_inner(
         event_json=json.dumps(event_data),
     )
 
-    # Reload workflow
+    # Reload workflow and verify integrity
     workflow_path = Path(run["workflow_path"])
     if not workflow_path.exists():
         return Envelope.failure(
@@ -525,6 +549,18 @@ def _resume_workflow_inner(
             run_id=run_id,
         )
     raw_text = workflow_path.read_text(encoding="utf-8")
+    current_hash = hashlib.sha256(raw_text.encode()).hexdigest()
+    if current_hash != run["workflow_hash"]:
+        return Envelope.failure(
+            command="resume",
+            error_code=ErrorCode.ERR_VALIDATION_WORKFLOW,
+            message=(
+                "Workflow file has changed since the run started. "
+                "Cannot resume against a different workflow."
+            ),
+            exit_code=ExitCode.VALIDATION_ERROR,
+            run_id=run_id,
+        )
     doc = WorkflowDocument.model_validate(yaml.safe_load(raw_text))
     workflow = doc.workflow
 
@@ -551,8 +587,19 @@ def _resume_workflow_inner(
                 if evaluate_condition(condition, eval_ctx):
                     next_step_id = transition.next
                     break
-            except EvaluatorError:
-                continue
+            except EvaluatorError as exc:
+                store.update_run(run_id, status="failed")
+                return Envelope.failure(
+                    command="resume",
+                    error_code=ErrorCode.ERR_STEP_FAILED,
+                    message=(
+                        f"Transition condition '{transition.when}' on step "
+                        f"'{current_step_id}' failed to evaluate: {exc}"
+                    ),
+                    exit_code=ExitCode.STEP_FAILED,
+                    run_id=run_id,
+                    current_step_id=current_step_id,
+                )
 
         if next_step_id is None:
             return Envelope.failure(

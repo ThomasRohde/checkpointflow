@@ -11,6 +11,8 @@ SUB_WORKFLOW = """\
 schema_version: checkpointflow/v1
 workflow:
   id: sub_workflow
+  defaults:
+    shell: bash
   inputs:
     type: object
     properties:
@@ -35,6 +37,8 @@ SUB_WORKFLOW_NO_END = """\
 schema_version: checkpointflow/v1
 workflow:
   id: sub_no_end
+  defaults:
+    shell: bash
   inputs:
     type: object
   steps:

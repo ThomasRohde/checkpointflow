@@ -251,13 +251,21 @@ cpf gui
 
 The runtime is intentionally opinionated.
 
-For most production workflows, teams start with:
+The core step kinds are:
 
-- `cli`
-- `await_event`
-- `end`
+- `cli` — run a shell command
+- `await_event` — pause for external input
+- `end` — terminate with a result
 
-That narrow core covers a surprising amount of real work while keeping the execution model understandable and replay-safe.
+Additional step kinds for composition and control flow:
+
+- `api` — HTTP request with JSON response capture
+- `switch` — conditional branching
+- `foreach` — iterate over a list
+- `parallel` — concurrent branch execution
+- `workflow` — invoke a sub-workflow
+
+See `cpf guide` for full documentation of each step kind.
 
 ## Storage Model
 
@@ -302,9 +310,6 @@ It is not trying to be a general-purpose programming language or a heavyweight d
 
 ## Documentation
 
-- [Guide](./checkpointflow-guide.md)
-- [Product and Technical Spec](./checkpointflow-prd.md)
-- [Phase 1 Implementation Plan](./checkpointflow-phase1-implementation-plan.md)
 - [Workflow Schema](./schemas/checkpointflow.schema.json)
 - [Run Envelope Schema](./schemas/checkpointflow-run-envelope.schema.json)
 - [Example Workflow](./examples/publish-confluence-change.yaml)

@@ -66,8 +66,14 @@ function buildGraph(steps: WorkflowStep[]): {
     const step = steps[i];
     const nextStep = steps[i + 1];
 
-    // Sequential edge to next step
-    if (nextStep) {
+    // Sequential edge to next step — skip when the step has explicit
+    // transitions (await_event with transitions, switch) or is an end step,
+    // since the runtime never falls through in those cases.
+    const hasExplicitBranching =
+      step.kind === "end" ||
+      step.kind === "switch" ||
+      (step.transitions && step.transitions.length > 0);
+    if (nextStep && !hasExplicitBranching) {
       const edgeId = `seq-${step.id}-${nextStep.id}`;
       g.setEdge(step.id, nextStep.id);
       edges.push({

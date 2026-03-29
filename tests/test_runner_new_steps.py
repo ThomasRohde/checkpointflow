@@ -11,6 +11,8 @@ SWITCH_WORKFLOW = """\
 schema_version: checkpointflow/v1
 workflow:
   id: switch_test
+  defaults:
+    shell: bash
   inputs:
     type: object
     required:
@@ -91,6 +93,8 @@ PARALLEL_WORKFLOW = """\
 schema_version: checkpointflow/v1
 workflow:
   id: parallel_test
+  defaults:
+    shell: bash
   inputs:
     type: object
   steps:
