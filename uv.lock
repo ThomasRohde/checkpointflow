@@ -43,7 +43,7 @@ wheels = [
 
 [[package]]
 name = "checkpointflow"
-version = "1.5.1"
+version = "1.5.2"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
