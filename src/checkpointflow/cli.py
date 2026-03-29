@@ -319,6 +319,20 @@ def cancel(
 
 
 @app.command()
+def delete(
+    run_id: Annotated[
+        str,
+        typer.Option("--run-id", help="Run ID to delete."),
+    ],
+) -> None:
+    """Permanently delete a completed, failed, or cancelled run."""
+    from checkpointflow.engine.runner import delete_run
+
+    envelope = delete_run(run_id, base_dir=_get_base_dir())
+    _emit(envelope)
+
+
+@app.command()
 def gui(
     port: Annotated[
         int,

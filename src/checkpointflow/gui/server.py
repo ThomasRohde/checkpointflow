@@ -13,6 +13,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from checkpointflow.gui.api import (
+    delete_run,
     discover_workflows,
     get_run_detail,
     get_step_output,
@@ -42,6 +43,18 @@ def create_app(base_dir: Path | None = None) -> Starlette:
         if detail is None:
             return _json({"error": "Run not found"}, 404)
         return _json(detail)
+
+    async def api_delete_run(request: Request) -> Response:
+        from checkpointflow.persistence.store import PersistenceError
+
+        run_id = request.path_params["run_id"]
+        try:
+            result = delete_run(store, run_id)
+        except PersistenceError:
+            return _json({"error": "Cannot delete active run"}, 409)
+        if result is None:
+            return _json({"error": "Run not found"}, 404)
+        return _json(result)
 
     async def api_step_stream(request: Request) -> Response:
         run_id = request.path_params["run_id"]
@@ -78,6 +91,7 @@ def create_app(base_dir: Path | None = None) -> Starlette:
     routes: list[Route | Mount] = [
         Route("/api/runs", api_runs),
         Route("/api/runs/{run_id}", api_run_detail),
+        Route("/api/runs/{run_id}", api_delete_run, methods=["DELETE"]),
         Route("/api/runs/{run_id}/steps/{step_id}/{stream}", api_step_stream),
         Route("/api/workflows", api_workflows),
     ]

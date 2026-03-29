@@ -647,6 +647,44 @@ def _resume_workflow_inner(
 # --- cancel_run ---
 
 
+def delete_run(
+    run_id: str,
+    *,
+    base_dir: Path | None = None,
+) -> Envelope:
+    """Permanently delete a terminal run and all its data."""
+    store = Store(base_dir=base_dir)
+    run = store.get_run(run_id)
+
+    if run is None:
+        return Envelope.failure(
+            command="delete",
+            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
+            message=f"Run not found: {run_id}",
+            exit_code=ExitCode.VALIDATION_ERROR,
+        )
+
+    if run["status"] in ("created", "running", "waiting"):
+        return Envelope.failure(
+            command="delete",
+            error_code=ErrorCode.ERR_RUN_NOT_WAITING,
+            message=f"Cannot delete active run {run_id} (status: {run['status']})",
+            exit_code=ExitCode.RUNTIME_ERROR,
+            run_id=run_id,
+        )
+
+    store.delete_run(run_id)
+    return Envelope.success(
+        command="delete",
+        run_id=run_id,
+        workflow_id=run["workflow_id"],
+        workflow_name=run.get("workflow_name"),
+        workflow_description=run.get("workflow_description"),
+        workflow_version=run["workflow_version"],
+        result={"deleted": True},
+    )
+
+
 def cancel_run(
     run_id: str,
     reason: str,

@@ -230,6 +230,31 @@ class Store:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def delete_run(self, run_id: str) -> None:
+        """Delete a run and all associated data. Only terminal runs can be deleted."""
+        import shutil
+
+        run = self.get_run(run_id)
+        if run is None:
+            msg = f"Run not found: {run_id}"
+            raise PersistenceError(msg)
+
+        if run["status"] in ("created", "running", "waiting"):
+            msg = f"Cannot delete run {run_id} (status: {run['status']})"
+            raise PersistenceError(msg)
+
+        # Delete child rows first, then the run
+        self._conn.execute("DELETE FROM artifacts WHERE run_id = ?", (run_id,))
+        self._conn.execute("DELETE FROM step_results WHERE run_id = ?", (run_id,))
+        self._conn.execute("DELETE FROM events WHERE run_id = ?", (run_id,))
+        self._conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+        self._conn.commit()
+
+        # Remove run directory if it exists
+        run_dir = self.base_dir / "runs" / run_id
+        if run_dir.exists():
+            shutil.rmtree(run_dir)
+
     def run_dir(self, run_id: str) -> Path:
         d = self.base_dir / "runs" / run_id
         for sub in ("stdout", "stderr", "artifacts"):

@@ -62,6 +62,15 @@ def get_run_detail(store: Store, run_id: str) -> dict[str, Any] | None:
     }
 
 
+def delete_run(store: Store, run_id: str) -> dict[str, Any] | None:
+    """Delete a run. Returns None if not found, raises PersistenceError if active."""
+    run = store.get_run(run_id)
+    if run is None:
+        return None
+    store.delete_run(run_id)
+    return {"deleted": True, "run_id": run_id}
+
+
 def get_step_output(store: Store, run_id: str, step_id: str, stream: str) -> str | None:
     """Read stdout or stderr for a step."""
     run_dir = store.base_dir / "runs" / run_id / stream
