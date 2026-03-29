@@ -61,18 +61,56 @@ function buildGraph(steps: WorkflowStep[]): {
     });
   }
 
+  // Helper: add a conditional/branching edge
+  function addBranchEdge(
+    source: string,
+    target: string,
+    label: string | undefined,
+  ) {
+    const color = transitionColors[colorIdx % transitionColors.length];
+    colorIdx++;
+    const edgeId = `br-${source}-${target}-${colorIdx}`;
+    g.setEdge(source, target);
+    edges.push({
+      id: edgeId,
+      source,
+      target,
+      type: "smoothstep",
+      animated: true,
+      label,
+      labelStyle: label ? { fontSize: 10, fill: color } : undefined,
+      labelBgStyle: label
+        ? { fill: "#fff", fillOpacity: 0.9 }
+        : undefined,
+      labelBgPadding: label ? ([4, 2] as [number, number]) : undefined,
+      labelBgBorderRadius: label ? 4 : undefined,
+      style: {
+        stroke: color,
+        strokeWidth: 1.5,
+        strokeDasharray: "6 3",
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color,
+        width: 16,
+        height: 16,
+      },
+    });
+  }
+
   // Add edges
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const nextStep = steps[i + 1];
 
-    // Sequential edge to next step — skip when the step has explicit
-    // transitions (await_event with transitions, switch) or is an end step,
-    // since the runtime never falls through in those cases.
+    // Determine if the step has explicit branching (no implicit fallthrough)
     const hasExplicitBranching =
       step.kind === "end" ||
       step.kind === "switch" ||
+      step.kind === "parallel" ||
       (step.transitions && step.transitions.length > 0);
+
+    // Sequential edge to next step (only when no explicit branching)
     if (nextStep && !hasExplicitBranching) {
       const edgeId = `seq-${step.id}-${nextStep.id}`;
       g.setEdge(step.id, nextStep.id);
@@ -92,36 +130,27 @@ function buildGraph(steps: WorkflowStep[]): {
       });
     }
 
-    // Transition edges
+    // await_event transition edges
     if (step.transitions) {
       for (const t of step.transitions) {
-        const color = transitionColors[colorIdx % transitionColors.length];
-        colorIdx++;
-        const edgeId = `tr-${step.id}-${t.next}-${t.when}`;
-        g.setEdge(step.id, t.next);
-        edges.push({
-          id: edgeId,
-          source: step.id,
-          target: t.next,
-          type: "smoothstep",
-          animated: true,
-          label: t.when,
-          labelStyle: { fontSize: 10, fill: color },
-          labelBgStyle: { fill: "#fff", fillOpacity: 0.9 },
-          labelBgPadding: [4, 2] as [number, number],
-          labelBgBorderRadius: 4,
-          style: {
-            stroke: color,
-            strokeWidth: 1.5,
-            strokeDasharray: "6 3",
-          },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color,
-            width: 16,
-            height: 16,
-          },
-        });
+        addBranchEdge(step.id, t.next, t.when);
+      }
+    }
+
+    // switch case edges
+    if (step.cases) {
+      for (const c of step.cases) {
+        addBranchEdge(step.id, c.next, c.when);
+      }
+      if (step.default) {
+        addBranchEdge(step.id, step.default, "default");
+      }
+    }
+
+    // parallel branch edges
+    if (step.branches) {
+      for (const b of step.branches) {
+        addBranchEdge(step.id, b.start_at, undefined);
       }
     }
   }
@@ -180,7 +209,9 @@ function StepDetailPanel({
           <div>
             <span className="text-xs text-zinc-400">Command</span>
             <pre className="text-xs font-mono bg-zinc-50 border border-zinc-200 rounded-md p-2 mt-0.5 whitespace-pre-wrap break-all">
-              {step.command}
+              {Array.isArray(step.command)
+                ? step.command.join("\n")
+                : step.command}
             </pre>
           </div>
         )}
@@ -208,6 +239,45 @@ function StepDetailPanel({
           <div>
             <span className="text-xs text-zinc-400">Transitions</span>
             <JsonView data={step.transitions} />
+          </div>
+        )}
+        {step.cases && step.cases.length > 0 && (
+          <div>
+            <span className="text-xs text-zinc-400">Cases</span>
+            <JsonView data={step.cases} />
+            {step.default && (
+              <div className="font-mono text-xs text-zinc-500 mt-1">
+                default: {step.default}
+              </div>
+            )}
+          </div>
+        )}
+        {step.method && step.url && (
+          <div>
+            <span className="text-xs text-zinc-400">Request</span>
+            <div className="font-mono text-xs text-zinc-700">
+              {step.method} {step.url}
+            </div>
+          </div>
+        )}
+        {step.items && (
+          <div>
+            <span className="text-xs text-zinc-400">Items</span>
+            <div className="font-mono text-xs text-zinc-700">{step.items}</div>
+          </div>
+        )}
+        {step.branches && step.branches.length > 0 && (
+          <div>
+            <span className="text-xs text-zinc-400">Branches</span>
+            <JsonView data={step.branches} />
+          </div>
+        )}
+        {step.workflow_ref && (
+          <div>
+            <span className="text-xs text-zinc-400">Workflow Ref</span>
+            <div className="font-mono text-xs text-zinc-700">
+              {step.workflow_ref}
+            </div>
           </div>
         )}
         {step.result !== undefined && step.result !== null && (

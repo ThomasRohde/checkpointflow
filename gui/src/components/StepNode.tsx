@@ -1,6 +1,16 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Terminal, Pause, Flag, Circle } from "lucide-react";
+import {
+  Terminal,
+  Pause,
+  Flag,
+  Circle,
+  GitBranch,
+  Globe,
+  Repeat,
+  Columns3,
+  Workflow,
+} from "lucide-react";
 import type { WorkflowStep } from "../lib/types";
 import { cn, truncate } from "../lib/utils";
 
@@ -42,6 +52,41 @@ const kindConfig: Record<
     text: "text-emerald-800",
     shape: "rounded-full",
   },
+  switch: {
+    icon: GitBranch,
+    bg: "bg-violet-50",
+    border: "border-violet-300",
+    text: "text-violet-800",
+    shape: "rounded-lg",
+  },
+  api: {
+    icon: Globe,
+    bg: "bg-cyan-50",
+    border: "border-cyan-300",
+    text: "text-cyan-800",
+    shape: "rounded-lg",
+  },
+  foreach: {
+    icon: Repeat,
+    bg: "bg-rose-50",
+    border: "border-rose-300",
+    text: "text-rose-800",
+    shape: "rounded-lg",
+  },
+  parallel: {
+    icon: Columns3,
+    bg: "bg-indigo-50",
+    border: "border-indigo-300",
+    text: "text-indigo-800",
+    shape: "rounded-lg",
+  },
+  workflow: {
+    icon: Workflow,
+    bg: "bg-teal-50",
+    border: "border-teal-300",
+    text: "text-teal-800",
+    shape: "rounded-lg",
+  },
 };
 
 const defaultConfig = {
@@ -60,12 +105,25 @@ function StepNodeComponent({ data }: NodeProps<StepNodeType>) {
   const isEnd = step.kind === "end";
   const subtitle =
     step.kind === "cli" && step.command
-      ? truncate(step.command, 40)
+      ? truncate(
+          Array.isArray(step.command) ? step.command.join(" && ") : step.command,
+          40,
+        )
       : step.kind === "await_event" && step.event_name
         ? step.event_name
-        : step.description
-          ? truncate(step.description, 40)
-          : null;
+        : step.kind === "api" && step.method && step.url
+          ? truncate(`${step.method} ${step.url}`, 40)
+          : step.kind === "foreach" && step.items
+            ? `over ${step.items}`
+            : step.kind === "parallel" && step.branches
+              ? `${step.branches.length} branches`
+              : step.kind === "workflow" && step.workflow_ref
+                ? truncate(step.workflow_ref, 40)
+                : step.kind === "switch" && step.cases
+                  ? `${step.cases.length} cases`
+                  : step.description
+                    ? truncate(step.description, 40)
+                    : null;
 
   return (
     <>

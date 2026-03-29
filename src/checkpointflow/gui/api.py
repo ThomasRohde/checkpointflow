@@ -131,7 +131,16 @@ def parse_workflow(path: str) -> dict[str, Any] | None:
             }
 
             # Add kind-specific fields
-            from checkpointflow.models.workflow import AwaitEventStep, CliStep, EndStep
+            from checkpointflow.models.workflow import (
+                ApiStep,
+                AwaitEventStep,
+                CliStep,
+                EndStep,
+                ForeachStep,
+                ParallelStep,
+                SwitchStep,
+                WorkflowRefStep,
+            )
 
             if isinstance(step, CliStep):
                 step_data["command"] = step.command
@@ -148,6 +157,18 @@ def parse_workflow(path: str) -> dict[str, Any] | None:
                 )
             elif isinstance(step, EndStep):
                 step_data["result"] = step.result
+            elif isinstance(step, SwitchStep):
+                step_data["cases"] = [{"when": c.when, "next": c.next} for c in step.cases]
+                step_data["default"] = step.default
+            elif isinstance(step, ApiStep):
+                step_data["method"] = step.method
+                step_data["url"] = step.url
+            elif isinstance(step, ForeachStep):
+                step_data["items"] = step.items
+            elif isinstance(step, ParallelStep):
+                step_data["branches"] = [{"start_at": b.start_at} for b in step.branches]
+            elif isinstance(step, WorkflowRefStep):
+                step_data["workflow_ref"] = step.workflow_ref
 
             steps.append(step_data)
 

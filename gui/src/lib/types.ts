@@ -63,6 +63,15 @@ export interface WorkflowDetail {
   path: string;
 }
 
+export interface Transition {
+  when: string;
+  next: string;
+}
+
+export interface Branch {
+  start_at: string;
+}
+
 export interface WorkflowStep {
   id: string;
   kind: StepKind;
@@ -70,17 +79,27 @@ export interface WorkflowStep {
   description: string;
   if?: string;
   index: number;
-  command?: string;
+  // cli
+  command?: string | string[];
   shell?: string;
   cwd?: string;
+  // await_event
   audience?: string;
   event_name?: string;
   prompt?: string;
   transitions?: Transition[];
+  // end
   result?: unknown;
-}
-
-export interface Transition {
-  when: string;
-  next: string;
+  // switch
+  cases?: Transition[];
+  default?: string;
+  // api
+  method?: string;
+  url?: string;
+  // foreach
+  items?: string;
+  // parallel
+  branches?: Branch[];
+  // workflow
+  workflow_ref?: string;
 }
