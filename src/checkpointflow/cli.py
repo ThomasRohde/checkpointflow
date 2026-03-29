@@ -326,11 +326,8 @@ def gui(
     ] = 8420,
 ) -> None:
     """Launch the checkpointflow web dashboard."""
-    try:
-        from checkpointflow.gui.server import run_server
-    except ImportError:
-        typer.echo("GUI requires extra dependencies: pip install checkpointflow[gui]")
-        raise typer.Exit(code=1) from None
+    from checkpointflow.gui.server import run_server
+
     run_server(port=port, base_dir=_get_base_dir())
 
 
