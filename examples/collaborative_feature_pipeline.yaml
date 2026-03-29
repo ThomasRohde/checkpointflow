@@ -2,14 +2,13 @@ schema_version: checkpointflow/v1
 workflow:
   id: collaborative_feature_pipeline
   name: Collaborative Feature Planning Pipeline
-  version: 1.0.0
+  version: 2.0.0
   description: >
     End-to-end feature planning with agent-human collaboration. An agent
-    researches the feature idea, runs parallel analysis (feasibility, effort,
+    researches the feature idea, runs analysis (feasibility, effort,
     dependencies), then synthesizes findings. Humans set direction, make
     architectural decisions, and give final sign-off. Supports fast-track
     routing for critical features and research spikes for uncertain ones.
-    Demonstrates every step kind: cli, await_event, switch, parallel, foreach, end.
 
   defaults:
     shell: bash
@@ -32,21 +31,26 @@ workflow:
       priority:
         type: string
         enum: [critical, normal, low]
-        description: Feature priority — critical triggers fast-track routing that skips parallel analysis
+        description: Feature priority — critical triggers fast-track routing that skips deep analysis
 
   steps:
     # ── Phase 1: Agent Research ──────────────────────────────
     - id: research
-      kind: cli
+      kind: await_event
+      audience: agent
+      event_name: feature_analysis
       name: "Agent: Analyze Feature Idea"
-      description: Agent investigates the feature space and produces an initial assessment
-      command: >-
-        echo '{"summary":"Analysis complete for: ${inputs.feature_idea}",
-        "complexity":"medium",
-        "risks":["scope creep","dependency on external API","migration complexity"],
-        "opportunities":["40% UX improvement","reduces support tickets by 25%","enables future integrations"],
-        "similar_features":["Competitor A has basic version","Open-source library available","Internal prototype from Q2"]}'
-      outputs:
+      prompt: |
+        Investigate the feature idea: "${inputs.feature_idea}"
+        Project: ${inputs.project_name}
+
+        Produce an initial assessment covering:
+        - A concise summary of what this feature entails
+        - Complexity estimate (low, medium, high)
+        - Key risks (technical, scope, dependency)
+        - Opportunities (UX improvement, cost reduction, future enablement)
+        - Similar features in competitors or open-source
+      input_schema:
         type: object
         required: [summary, complexity, risks, opportunities]
         properties:
@@ -98,50 +102,56 @@ workflow:
       cases:
         - when: 'inputs.priority == "critical"'
           next: fast_track_notice
-      default: parallel_analysis
+      default: technical_feasibility
 
     - id: fast_track_notice
       kind: cli
       name: "System: Fast Track Alert"
       command: echo '{"message":"FAST TRACK activated for ${inputs.project_name}. Expedited analysis in progress."}'
 
-    # ── Phase 4: Parallel Deep Analysis (3 concurrent tracks) ─
-    - id: parallel_analysis
-      kind: parallel
-      name: "Agent: Run 3 Analysis Tracks in Parallel"
-      branches:
-        - start_at: technical_feasibility
-        - start_at: effort_estimation
-        - start_at: dependency_audit
-
+    # ── Phase 4: Deep Analysis (sequential agent steps) ──────
     - id: technical_feasibility
-      kind: cli
+      kind: await_event
+      audience: agent
+      event_name: feasibility_results
       name: "Agent: Technical Feasibility Check"
-      command: >-
-        echo '{"feasible":true,
-        "tech_stack":["TypeScript","React","PostgreSQL"],
-        "new_deps":["redis","bull-mq"],
-        "confidence":0.87,
-        "concerns":["Redis cluster management","Queue monitoring needs"]}'
-      outputs:
+      prompt: |
+        Assess technical feasibility for: "${inputs.feature_idea}"
+        Project: ${inputs.project_name}
+        Complexity: ${steps.research.outputs.complexity}
+
+        Evaluate:
+        - Is this technically feasible with the current stack?
+        - What technology stack and tools are needed?
+        - What new dependencies would be required?
+        - What are the technical concerns or risks?
+        - Confidence level (0.0 to 1.0)
+      input_schema:
         type: object
         required: [feasible, confidence]
         properties:
           feasible: { type: boolean }
-          tech_stack: { type: array }
-          new_deps: { type: array }
+          tech_stack: { type: array, items: { type: string } }
+          new_deps: { type: array, items: { type: string } }
           confidence: { type: number }
-          concerns: { type: array }
+          concerns: { type: array, items: { type: string } }
 
     - id: effort_estimation
-      kind: cli
+      kind: await_event
+      audience: agent
+      event_name: effort_results
       name: "Agent: Effort Estimation"
-      command: >-
-        echo '{"total_days":14,
-        "breakdown":{"design":2,"backend":5,"frontend":4,"testing":2,"docs":1},
-        "team_size":2,
-        "parallel_possible":true}'
-      outputs:
+      prompt: |
+        Estimate the effort for: "${inputs.feature_idea}"
+        Feasibility confidence: ${steps.technical_feasibility.outputs.confidence}
+        Tech stack: ${steps.technical_feasibility.outputs.tech_stack}
+
+        Provide:
+        - Total estimated days
+        - Breakdown by phase (design, backend, frontend, testing, docs)
+        - Recommended team size
+        - Whether phases can run in parallel
+      input_schema:
         type: object
         required: [total_days, breakdown]
         properties:
@@ -151,37 +161,53 @@ workflow:
           parallel_possible: { type: boolean }
 
     - id: dependency_audit
-      kind: cli
+      kind: await_event
+      audience: agent
+      event_name: dependency_results
       name: "Agent: Dependency Audit"
-      command: >-
-        echo '{"blockers":[],
-        "soft_deps":["auth-service >= 2.1.0","shared-types >= 3.0.0"],
-        "external_apis":["Stripe Payments API","SendGrid Email API"],
-        "license_ok":true}'
-      outputs:
+      prompt: |
+        Audit dependencies for: "${inputs.feature_idea}"
+        New deps identified: ${steps.technical_feasibility.outputs.new_deps}
+
+        Check:
+        - Are there any hard blockers (missing APIs, incompatible versions)?
+        - What soft dependencies exist (minimum versions, optional services)?
+        - What external APIs would be consumed?
+        - Are all licenses compatible?
+      input_schema:
         type: object
         required: [blockers, license_ok]
         properties:
-          blockers: { type: array }
-          soft_deps: { type: array }
-          external_apis: { type: array }
+          blockers: { type: array, items: { type: string } }
+          soft_deps: { type: array, items: { type: string } }
+          external_apis: { type: array, items: { type: string } }
           license_ok: { type: boolean }
 
     # ── Phase 5: Agent Synthesizes Findings ──────────────────
     - id: synthesize
-      kind: cli
+      kind: await_event
+      audience: agent
+      event_name: synthesis
       name: "Agent: Synthesize All Findings"
-      command: >-
-        echo '{"recommendation":"proceed",
-        "design_sections":["Problem Statement","User Stories","Technical Architecture","API Design","Data Model Changes","Testing Strategy","Rollout Plan"],
-        "open_questions":["Redis hosting: managed vs self-hosted?","API versioning: URL path vs header?","Feature flag rollout percentage?"]}'
-      outputs:
+      prompt: |
+        Synthesize all analysis for "${inputs.feature_idea}":
+
+        Research: ${steps.research.outputs.summary}
+        Feasibility: ${steps.technical_feasibility.outputs.feasible} (confidence: ${steps.technical_feasibility.outputs.confidence})
+        Effort: ${steps.effort_estimation.outputs.total_days} days, ${steps.effort_estimation.outputs.team_size} engineers
+        Blockers: ${steps.dependency_audit.outputs.blockers}
+
+        Provide:
+        - Overall recommendation (proceed, proceed_with_caution, defer, reject)
+        - List of design document sections to draft
+        - Open questions that need human input before proceeding
+      input_schema:
         type: object
         required: [recommendation, design_sections, open_questions]
         properties:
           recommendation: { type: string }
-          design_sections: { type: array }
-          open_questions: { type: array }
+          design_sections: { type: array, items: { type: string } }
+          open_questions: { type: array, items: { type: string } }
 
     # ── Phase 6: Human Makes Architectural Decisions ─────────
     - id: architecture_review
@@ -218,27 +244,24 @@ workflow:
         - when: ${event.proceed == false}
           next: revision_needed
 
-    # ── Phase 7: Agent Generates Plan Sections (foreach) ─────
-    - id: generate_plan_sections
-      kind: foreach
-      name: "Agent: Draft Each Plan Section"
-      items: steps.synthesize.outputs.design_sections
-      body:
-        - id: write_section
-          kind: cli
-          command: echo "Section ${item_index} drafted -- ${item}"
-
-    # ── Phase 8: Agent Compiles Final Plan ───────────────────
+    # ── Phase 7: Agent Drafts and Compiles Plan ──────────────
     - id: compile_plan
-      kind: cli
-      name: "Agent: Compile Final Plan"
-      command: >-
-        echo '{"plan_ready":true,
-        "total_sections":7,
-        "project":"${inputs.project_name}",
-        "feature":"${inputs.feature_idea}",
-        "next_actions":["Create tracking epic","Schedule team kickoff","Set up feature branch","Provision infrastructure","Draft API contract"]}'
-      outputs:
+      kind: await_event
+      audience: agent
+      event_name: plan_compiled
+      name: "Agent: Draft and Compile Feature Plan"
+      prompt: |
+        Draft the complete feature plan for "${inputs.feature_idea}".
+        Project: ${inputs.project_name}
+
+        Design sections to cover: ${steps.synthesize.outputs.design_sections}
+        Human decisions: ${steps.architecture_review.outputs.answers}
+        Scope notes: ${steps.architecture_review.outputs.scope_notes}
+
+        For each section, write detailed content covering the design,
+        trade-offs, and implementation approach. Then compile everything
+        into a cohesive plan with clear next actions.
+      input_schema:
         type: object
         required: [plan_ready, total_sections, next_actions]
         properties:
@@ -246,9 +269,9 @@ workflow:
           total_sections: { type: number }
           project: { type: string }
           feature: { type: string }
-          next_actions: { type: array }
+          next_actions: { type: array, items: { type: string } }
 
-    # ── Phase 9: Final Human Sign-off ────────────────────────
+    # ── Phase 8: Final Human Sign-off ────────────────────────
     - id: final_signoff
       kind: await_event
       name: "Human: Final Sign-off"
@@ -314,22 +337,27 @@ workflow:
 
     # ── Spike Branch (reached via transition from direction_review) ─
     - id: spike_research
-      kind: cli
+      kind: await_event
+      audience: agent
+      event_name: spike_results
       name: "Agent: Execute Research Spike"
-      command: >-
-        echo '{"spike_complete":true,
-        "findings":"Detailed research completed for: ${inputs.feature_idea}",
-        "recommendation":"Proceed with MVP approach after spike validates core assumption",
-        "artifacts":["spike-report.md","prototype/","benchmark-results.json"],
-        "time_box":"2 days"}'
-      outputs:
+      prompt: |
+        Run a time-boxed research spike for: "${inputs.feature_idea}"
+        Project: ${inputs.project_name}
+
+        Investigate feasibility, prototype if possible, and report:
+        - Key findings from the exploration
+        - Recommendation on how to proceed
+        - What artifacts were produced (reports, prototypes, benchmarks)
+        - How long the spike took
+      input_schema:
         type: object
         required: [spike_complete, findings]
         properties:
           spike_complete: { type: boolean }
           findings: { type: string }
           recommendation: { type: string }
-          artifacts: { type: array }
+          artifacts: { type: array, items: { type: string } }
           time_box: { type: string }
 
     - id: spike_review

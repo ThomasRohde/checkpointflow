@@ -5,58 +5,67 @@ description: Run, resume, and manage checkpointflow workflows interactively. Use
 
 # cpf-workflow-runner
 
-Run checkpointflow workflows interactively, handling pause/resume cycles with the user.
+Run checkpointflow workflows interactively, handling pause/resume cycles.
 
-## Core concept: You are the agent
+## Core concept: Audience-driven dispatch
 
-Checkpointflow orchestrates collaboration between humans and AI agents. The engine handles sequencing, checkpoints, and state — but **you are the agent**. When the workflow contains `cli` steps that describe agent work, the `echo` command is a structural placeholder that feeds the engine the output it needs to advance. The actual work is your responsibility.
+Checkpointflow workflows pause at `await_event` steps. Each pause has an `audience` field in the envelope's `wait` block that tells you who should act:
 
-### Recognizing agent steps
+- **`audience: "agent"`** — The prompt is your work assignment. Do the work (read code, write files, run tools), produce JSON matching `input_schema`, and resume immediately. Never present agent pauses to the user.
+- **`audience: "user"`** — Present the prompt and collect input from the user via structured prompts, then resume with their answers.
 
-A step is agent-directed when:
+This is the only dispatch you need. The envelope tells you everything — no need to read the workflow YAML to figure out what to do.
 
-- Its name is prefixed with "Agent:" (e.g., `"Agent: Write Failing Tests"`)
-- Its description contains action verbs implying real work (e.g., "Scan the relevant source area and identify files, tests, and dependencies")
-- Its command is an `echo` outputting static or templated JSON — not a real tool invocation
+### Agent pause example
 
-Steps prefixed "Human:" or "System:" are not agent-directed. Human steps are `await_event` checkpoints. System steps are `switch`/`parallel`/`end` — handled by the engine.
-
-### When to do the work
-
-The engine runs all steps between pause points automatically. By the time you see the envelope, the agent `cli` steps have already "completed" with their echo output. The `await_event` checkpoints are your natural intervention points.
-
-**At each pause, before presenting the checkpoint to the user:**
-
-1. Read the workflow YAML (if you haven't already) to identify which agent steps just executed since the last pause
-2. Do the actual work each step describes — use the step's `name`, `description`, and `outputs` schema as your assignment
-3. Present your real results to the user alongside the checkpoint prompt
-
-The `wait.prompt` will contain interpolated values from the echo outputs (e.g., fake file lists, hardcoded test counts). Replace these with your real findings when presenting to the user.
-
-### Example: what "doing the work" looks like
-
-Given this step in the workflow:
-```yaml
-- id: analyze_codebase
-  kind: cli
-  name: "Agent: Analyze Affected Area"
-  description: Scan the relevant source area and identify files, tests, and dependencies
-  command: echo '{"area":"gui", "source_dir":"src/checkpointflow/gui/", ...}'
+```json
+{
+  "wait": {
+    "audience": "agent",
+    "event_name": "codebase_analysis",
+    "prompt": "Analyze the codebase for feature \"run-delete\" in area \"gui\".\nScan src/checkpointflow/gui/ and identify source files, tests, dependencies...",
+    "input_schema": {
+      "type": "object",
+      "required": ["area", "source_dir", "notes"],
+      "properties": {
+        "area": { "type": "string" },
+        "source_dir": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
 ```
 
-Don't just let the echo run and move on. Actually:
-- Read files in the source directory
-- Find existing test files
-- Identify imports and dependencies
-- Assess schema impact
+When you see this:
+1. Read the prompt — it describes exactly what to do
+2. Do the work (read files, explore code, run tools, etc.)
+3. Build JSON matching `input_schema` with your real findings
+4. Resume immediately: `cpf resume --run-id <id> --event codebase_analysis --input '<json>'`
 
-Then present your real findings at the checkpoint that follows.
+### User pause example
 
-For a step like `"Agent: Write Failing Tests"` — actually write test files. For `"Agent: Implement Feature"` — actually write production code. For quality gate steps — actually run `uv run pytest`, `uv run ruff check .`, `uv run mypy`.
+```json
+{
+  "wait": {
+    "audience": "user",
+    "event_name": "scope_choice",
+    "prompt": "Feature: run-delete\nHow should we scope this?\n- full: Complete implementation...\n- minimal: Core logic only...",
+    "input_schema": {
+      "type": "object",
+      "required": ["scope"],
+      "properties": {
+        "scope": { "type": "string", "enum": ["full", "minimal", "spike", "cancel"] }
+      }
+    }
+  }
+}
+```
 
-### Multiple agent steps between pauses
-
-Sometimes several agent steps run before the next checkpoint (e.g., write tests → implement → lint → typecheck → test → gate check → review). Do all of that work at the pause. The workflow structure tells you the order and what each step expects.
+When you see this:
+1. Present the prompt context to the user
+2. Collect their input via structured prompts (AskUserQuestion)
+3. Resume: `cpf resume --run-id <id> --event scope_choice --input '{"scope": "full"}'`
 
 ## Critical: Collect input through structured prompts, not chat
 
@@ -117,43 +126,32 @@ Based on `exit_code`:
 | Exit code | What happened | What to do |
 |-----------|--------------|------------|
 | 0 | Completed | Show the `result` to the user. Done. |
-| 40 | Waiting for input | **Do agent work first** (see below), then enter the interactive loop. |
+| 40 | Waiting for input | Enter the interactive loop (dispatches on audience). |
 | 10 | Validation error | Show `error.message`. Check inputs match the schema. |
 | 30 | Step failed | Show which step failed and why. Offer to inspect with `cpf inspect`. |
 | 80 | Unsupported step | Tell the user this step kind isn't implemented yet. |
 | Other | Error | Show the error and suggest next steps. |
 
-### Step 5a: Do agent work before presenting checkpoints
-
-When exit code is 40, before asking the user for input:
-
-1. Look at the workflow YAML — identify every agent-directed `cli` step that ran between the start (or last pause) and the current `await_event`
-2. Execute the real work each step describes (read code, write files, run commands, etc.)
-3. Present your actual findings/results to the user as context for their decision
-
-This is the step that makes the workflow real — without it, you're just passing fake echo output through human checkpoints.
-
 ## Interactive loop (await_event handling)
 
-This is the core of the skill. When a workflow pauses at an `await_event` step (exit code 40), do any pending agent work first (see "Core concept" above), then handle the checkpoint. The envelope contains a `wait` block:
+This is the core of the skill. When a workflow pauses (exit code 40), the envelope contains a `wait` block. Dispatch on `wait.audience`:
 
-```json
-{
-  "workflow_name": "My Workflow",
-  "workflow_description": "What this workflow does",
-  "wait": {
-    "audience": "user",
-    "event_name": "approval",
-    "prompt": "Review and approve or reject.",
-    "input_schema": { ... },
-    "resume": {
-      "command": "cpf resume --run-id <id> --event approval --input @event.json"
-    }
-  }
-}
-```
+### Agent audience (`wait.audience == "agent"`)
 
-Handle it like this:
+The prompt is your work assignment. Do not present it to the user.
+
+1. **Read `wait.prompt`** — it describes the work to do, with full context from previous steps already interpolated in.
+2. **Do the work** — read code, write files, run tools, explore the codebase — whatever the prompt asks for.
+3. **Build event JSON** matching `wait.input_schema` with your real results.
+4. **Resume immediately:**
+   ```bash
+   cpf resume --run-id <run_id> --event <event_name> --input '<event_json>'
+   ```
+5. **Parse the new envelope** and loop back.
+
+### User audience (`wait.audience == "user"`)
+
+Present the checkpoint to the user and collect their input.
 
 1. **Read the wait block** — extract `prompt`, `input_schema`, `event_name`, and `run_id`.
 
@@ -167,14 +165,6 @@ Handle it like this:
 
    **Use the `prompt` from the wait block** as context when presenting the questions — it explains what the user is deciding on.
 
-   **Example:** For this schema:
-   ```json
-   {"required": ["decision"], "properties": {"decision": {"type": "string", "enum": ["approve", "reject"]}, "notes": {"type": "string"}}}
-   ```
-   Present a structured prompt with:
-   - Question 1 (Decision): options "approve" / "reject"
-   - Question 2 (Notes): options "No notes" / "Looks good, minor nits" (realistic examples, not placeholders)
-
 3. **Build the event JSON** from the user's answers. Map each answer back to the field name in `input_schema`. Make sure the result matches the schema types (strings stay strings, numbers get parsed).
 
 4. **Resume the workflow:**
@@ -184,39 +174,45 @@ Handle it like this:
 
 5. **Parse the new envelope** and loop back:
    - If exit code 0 → done, show result
-   - If exit code 40 → another await_event, repeat from step 1
+   - If exit code 40 → another await_event, dispatch on audience again
    - If error → show it
 
 Keep looping until the workflow completes, fails, or the user wants to stop.
 
-**Example interaction flow (with agent work):**
+**Example interaction flow:**
 
 ```
 User: run the feature development workflow
 → cpf run -f examples/cpf_feature_development.yaml --input '{"feature_name": "run-delete", ...}'
-→ Exit 40: waiting at "scope_decision" step
-→ Agent step "analyze_codebase" just ran — DO THE ACTUAL WORK:
-  - Read src/checkpointflow/gui/ to find relevant files
-  - Find existing tests in tests/test_gui*.py
-  - Identify dependencies and schema impact
-→ Present real findings + structured prompt for scope choice
-→ User picks "full"
-→ cpf resume --run-id abc123 --event scope_choice --input '{"scope": "full"}'
-→ Exit 40: waiting at "review_tdd_plan" step
-→ Agent step "tdd_plan" just ran — DO THE ACTUAL WORK:
-  - Design real test cases based on the codebase analysis
-  - Plan the implementation approach
-→ Present real TDD plan + structured prompt for approval
-→ User picks "approve"
-→ cpf resume --run-id abc123 --event tdd_review --input '{"decision": "approve"}'
-→ Exit 40: waiting at "final_review" step
-→ Agent steps "write_tests", "implement_feature", quality gate all ran — DO THE ACTUAL WORK:
-  - Write real test files
-  - Implement the feature code
-  - Run uv run ruff check ., uv run mypy, uv run pytest
-→ Present real results + structured prompt for ship/revise
-→ User picks "ship_it"
-→ cpf resume → Exit 0: completed
+→ Exit 40: audience=agent at "analyze_codebase"
+  → Read prompt, analyze the codebase for real
+  → Resume with real findings JSON
+→ Exit 40: audience=user at "scope_decision"
+  → Present analysis results + structured prompt for scope
+  → User picks "full"
+  → Resume with {"scope": "full"}
+→ Exit 40: audience=agent at "tdd_plan"
+  → Read prompt, design real test plan
+  → Resume with test plan JSON
+→ Exit 40: audience=user at "review_tdd_plan"
+  → Present TDD plan + structured prompt for approval
+  → User picks "approve"
+  → Resume with {"decision": "approve"}
+→ Exit 40: audience=agent at "write_tests"
+  → Write real test files
+  → Resume with results
+→ Exit 40: audience=agent at "implement_feature"
+  → Write production code, run tests
+  → Resume with results
+→ Exit 40: audience=agent at "quality_gate"
+  → Run ruff, mypy, pytest — fix issues
+  → Resume with pass/fail results
+→ (gate_result switch routes to final_review)
+→ Exit 40: audience=user at "final_review"
+  → Present quality results + structured prompt
+  → User picks "ship_it"
+  → Resume
+→ Exit 0: completed
 ```
 
 ## Status and inspection
@@ -253,12 +249,12 @@ The dashboard shows workflow graphs with all step types rendered, run history wi
 
 ## Tips
 
-- **Agent steps are work assignments, not status updates.** When a step says "Agent: Write Failing Tests", write tests. Don't just watch the echo command produce fake output.
-- **Read the workflow YAML early.** You need it to know which agent steps ran between pauses so you can do the work before presenting each checkpoint.
+- **Agent pauses are auto-resume** — never present them to the user. Do the work silently and resume.
+- **The prompt has full context** via interpolation — you do not need to read the workflow YAML to understand the work. The prompt already references previous step outputs.
+- **If you can't complete agent work**, still provide valid JSON with honest status fields (e.g., `lint_ok: false`, `implemented: false`). The workflow's branching logic handles failure paths.
 - Always parse the JSON envelope — don't rely on exit codes alone. The envelope has richer information.
 - Exit code 40 is not an error. Don't treat it as a failure or apologize for it.
 - When showing results to the user, format them nicely — don't dump raw JSON unless they ask for it.
 - If a workflow has multiple sequential `await_event` steps (like a quiz), keep the loop going smoothly without re-explaining the process each time.
 - The `--input` flag accepts either inline JSON (`'{"key": "value"}'`) or a file reference (`@path/to/file.json`). Prefer inline for simple inputs.
 - Use `workflow_name` and `workflow_description` from the envelope to provide context to the user, especially on the first interaction.
-- For quality gate steps that specify commands like lint/typecheck/test, run the real tools (`uv run ruff check .`, `uv run mypy`, `uv run pytest`) — don't rely on the hardcoded echo output.

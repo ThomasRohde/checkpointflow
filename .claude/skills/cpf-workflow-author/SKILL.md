@@ -121,7 +121,7 @@ All step kinds below are fully supported at runtime.
 
 ### cli
 
-Runs a shell command. Supports `${inputs.x}` and `${steps.<id>.outputs.x}` interpolation.
+Runs a shell command. Supports `${inputs.x}` and `${steps.<id>.outputs.x}` interpolation. Use `cli` for steps that run real shell commands. Do NOT use `cli` with `echo` as a placeholder for agent work — use `await_event` with `audience: agent` instead.
 
 `command` accepts a string or a list of strings. Lists are joined with `&&` at runtime — use lists to avoid YAML multi-line scalar pitfalls:
 
@@ -171,10 +171,12 @@ Use `if` for conditional execution (no `${}` wrapper needed):
 
 Pauses the workflow and waits for external input. The CLI exits with code 40 and emits a waiting envelope that tells the caller exactly what input is needed and how to resume.
 
+**`audience: user`** — The step pauses for a human to make a decision. The `prompt` presents context and choices. The `input_schema` defines what the user should provide.
+
 ```yaml
 - id: review
   kind: await_event
-  audience: user          # who should provide input: user, agent, or system
+  audience: user
   event_name: review_decision
   prompt: Review the results and decide whether to proceed.
   input_schema:
@@ -186,6 +188,28 @@ Pauses the workflow and waits for external input. The CLI exits with code 40 and
         enum: [approve, reject]
       notes:
         type: string
+```
+
+**`audience: agent`** — The step pauses for an AI agent to do real work. The `prompt` is the work assignment — describe what to analyze, build, or run. The `input_schema` defines the structured output the agent must deliver. The workflow pauses, the agent does the work, and resumes with results. Use this instead of `cli` with `echo` for agent work.
+
+```yaml
+- id: analyze
+  kind: await_event
+  audience: agent
+  event_name: analysis_results
+  name: "Agent: Analyze Codebase"
+  prompt: |
+    Scan src/${inputs.area}/ and identify:
+    - Source files and their responsibilities
+    - Existing test files
+    - Key dependencies
+  input_schema:
+    type: object
+    required: [files_found, notes]
+    properties:
+      files_found: { type: array, items: { type: string } }
+      test_files: { type: array, items: { type: string } }
+      notes: { type: string }
 ```
 
 Add `transitions` to branch based on the input received:
@@ -390,6 +414,7 @@ Be aware that steps between a transition target and the next step will execute s
 - **Using `${}` in `if` conditions** — `if` takes a bare expression, not wrapped in `${}`.
 - **Forgetting `input_schema` on `await_event`** — it's required, not optional.
 - **Incomplete transition coverage** — when `await_event` has `transitions`, every possible `input_schema` enum value must have a matching `when` clause. Uncovered values cause a runtime failure, not a fallthrough.
+- **Using `cli` with `echo` for agent work** — use `await_event` with `audience: agent` instead. The `prompt` describes the work, and `input_schema` defines the expected output.
 - **Step kind typos** — supported kinds are `cli`, `await_event`, `end`, `switch`, `api`, `foreach`, `parallel`, and `workflow`. Any other kind fails at runtime with exit code 80.
 
 ## After writing the workflow

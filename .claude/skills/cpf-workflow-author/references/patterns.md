@@ -6,10 +6,11 @@ Read this file when you need inspiration for structuring a workflow. Each patter
 
 1. [Linear pipeline](#linear-pipeline)
 2. [Approval gate](#approval-gate)
-3. [Multi-branch decision](#multi-branch-decision)
-4. [Conditional skip](#conditional-skip)
-5. [Data pipeline with output chaining](#data-pipeline-with-output-chaining)
-6. [Quiz / multi-step interaction](#quiz--multi-step-interaction)
+3. [Agent work step](#agent-work-step)
+4. [Multi-branch decision](#multi-branch-decision)
+5. [Conditional skip](#conditional-skip)
+6. [Data pipeline with output chaining](#data-pipeline-with-output-chaining)
+7. [Quiz / multi-step interaction](#quiz--multi-step-interaction)
 
 ---
 
@@ -93,6 +94,76 @@ steps:
     kind: end
     result: { status: rejected }
 ```
+
+## Agent work step
+
+Pause for an AI agent to perform work and return structured results. The agent reads the prompt as a work assignment, does the actual work, and resumes with output matching the schema. Pair with a user step for human review of agent output.
+
+```yaml
+steps:
+  - id: analyze
+    kind: await_event
+    audience: agent
+    event_name: analysis_results
+    name: "Agent: Analyze Codebase"
+    prompt: |
+      Analyze the ${inputs.target} directory and identify:
+      - Source files and their responsibilities
+      - Test coverage gaps
+      - Key dependencies
+    input_schema:
+      type: object
+      required: [files_found, test_gaps]
+      properties:
+        files_found: { type: array, items: { type: string } }
+        test_gaps: { type: array, items: { type: string } }
+        notes: { type: string }
+
+  - id: review
+    kind: await_event
+    audience: user
+    event_name: review_decision
+    prompt: |
+      Analysis found ${steps.analyze.outputs.files_found} files.
+      Test gaps: ${steps.analyze.outputs.test_gaps}
+
+      Approve or request changes?
+    input_schema:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approve, revise] }
+    transitions:
+      - when: ${event.decision == "approve"}
+        next: implement
+      - when: ${event.decision == "revise"}
+        next: revision
+
+  - id: implement
+    kind: await_event
+    audience: agent
+    event_name: implementation
+    name: "Agent: Implement Changes"
+    prompt: |
+      Implement fixes for the test gaps identified:
+      ${steps.analyze.outputs.test_gaps}
+    input_schema:
+      type: object
+      required: [completed]
+      properties:
+        completed: { type: boolean }
+        files_changed: { type: array, items: { type: string } }
+
+  - id: done
+    kind: end
+    result: { status: completed }
+
+  - id: revision
+    kind: end
+    result: { status: needs_revision }
+```
+
+The key pattern: `audience: agent` steps have prompts that describe real work, and `input_schema` defines the deliverable. `audience: user` steps present findings and collect decisions.
 
 ## Multi-branch decision
 
