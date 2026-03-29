@@ -147,6 +147,17 @@ cpf cancel --run-id <run_id> --reason "<reason>"
 
 Use a structured prompt to confirm before cancelling, and ask for a reason if not provided.
 
+## Web dashboard
+
+Launch the GUI to browse workflows and runs visually:
+
+```bash
+cpf gui                    # opens http://localhost:8420
+cpf gui --port 9000        # custom port
+```
+
+The dashboard shows workflow graphs with all step types rendered, run history with search/sort, and step detail panels.
+
 ## Tips
 
 - Always parse the JSON envelope — don't rely on exit codes alone. The envelope has richer information.

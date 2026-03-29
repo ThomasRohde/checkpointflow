@@ -72,17 +72,24 @@ Key rules:
 - Every step needs a unique `id`
 - Steps execute sequentially unless a transition jumps elsewhere
 
-## Step kinds (runtime-supported)
+## Step kinds
+
+All step kinds below are fully supported at runtime.
 
 ### cli
 
-Runs a shell command. Supports `${inputs.x}` and `${steps.<id>.outputs.x}` interpolation in the command string.
+Runs a shell command. Supports `${inputs.x}` and `${steps.<id>.outputs.x}` interpolation.
+
+`command` accepts a string or a list of strings. Lists are joined with `&&` at runtime — use lists to avoid YAML multi-line scalar pitfalls:
 
 ```yaml
 - id: build
   kind: cli
   cwd: ${inputs.project_dir}
-  command: npm run build --project ${inputs.project_name}
+  command:
+    - npm run lint
+    - npm run build --project ${inputs.project_name}
+    - npm test
   timeout_seconds: 120
 ```
 
@@ -164,6 +171,83 @@ Terminates the workflow with an explicit result. The result can interpolate valu
 
 If no `end` step is present, the workflow completes implicitly after the last step with no result. Use `end` when you want to return meaningful data or when you have multiple terminal states (e.g., approved vs. rejected).
 
+### switch
+
+Evaluates conditions in order and jumps to the first matching step. Use for data-driven branching without human input.
+
+```yaml
+- id: route
+  kind: switch
+  cases:
+    - when: 'inputs.priority == "critical"'
+      next: fast_track
+    - when: 'inputs.priority == "low"'
+      next: backlog
+  default: standard_review
+```
+
+Each case has `when` (expression) and `next` (target step ID). `default` is optional — if no case matches and no default, the step fails.
+
+### api
+
+Makes an HTTP request. Response body is parsed as JSON and exposed as step outputs.
+
+```yaml
+- id: fetch_status
+  kind: api
+  method: GET
+  url: ${inputs.api_base}/health
+  headers:
+    Authorization: Bearer ${inputs.token}
+```
+
+Optional: `body` (sent as JSON), `headers`, `success.status_codes` (default: `[200, 201, 204]`), `timeout_seconds` (default: 30).
+
+### foreach
+
+Iterates over a list. Within body steps, `${item}` is the current element and `${item_index}` is the zero-based index.
+
+```yaml
+- id: process_files
+  kind: foreach
+  items: inputs.files
+  body:
+    - id: convert
+      kind: cli
+      command: convert ${item} --output out_${item_index}.pdf
+```
+
+Body steps currently support `cli` and `end` kinds.
+
+### parallel
+
+Runs multiple steps concurrently. Each branch references a step ID via `start_at`. All branches must succeed.
+
+```yaml
+- id: checks
+  kind: parallel
+  branches:
+    - start_at: lint
+    - start_at: test
+    - start_at: typecheck
+```
+
+Branch target steps must be `cli` or `end` steps in the same workflow.
+
+### workflow
+
+Invokes another workflow YAML as a sub-workflow.
+
+```yaml
+- id: deploy
+  kind: workflow
+  workflow_ref: ./deploy.yaml
+  inputs:
+    version: ${steps.build.outputs.version}
+```
+
+Sub-workflow steps currently support `cli` and `end` kinds.
+
 ## Expressions
 
 Expressions use `${...}` syntax for interpolation in `command` strings and transition `when` clauses:
@@ -184,6 +268,16 @@ Operators: `==`, `!=`, `and`, `or`
   kind: cli
   command: do-extra-work
   if: inputs.thorough == "yes"
+```
+
+**Branch on data** — use `switch` for data-driven branching without human input:
+```yaml
+- id: route
+  kind: switch
+  cases:
+    - when: 'steps.check.outputs.count == 0'
+      next: nothing_to_do
+  default: process_items
 ```
 
 **Branch after human input** — use `transitions` on `await_event` to jump to different steps based on the response. Make sure every transition target step exists in the steps array:
@@ -226,7 +320,7 @@ Be aware that steps between a transition target and the next step will execute s
 - **Transition target doesn't exist** — every `next` value must match an actual step `id`.
 - **Using `${}` in `if` conditions** — `if` takes a bare expression, not wrapped in `${}`.
 - **Forgetting `input_schema` on `await_event`** — it's required, not optional.
-- **Step kind typos** — only `cli`, `await_event`, and `end` are supported at runtime. Others (`api`, `switch`, `foreach`, `parallel`, `workflow`) pass validation but fail at runtime with exit code 80.
+- **Step kind typos** — supported kinds are `cli`, `await_event`, `end`, `switch`, `api`, `foreach`, `parallel`, and `workflow`. Any other kind fails at runtime with exit code 80.
 
 ## After writing the workflow
 
