@@ -147,3 +147,33 @@ def test_foreach_provides_item_index(tmp_path: Path) -> None:
     assert result.outputs is not None
     assert result.outputs["iterations"][0]["idx"]["index"] == 0
     assert result.outputs["iterations"][1]["idx"]["index"] == 1
+
+
+def test_foreach_with_workflow_ref(tmp_path: Path) -> None:
+    """foreach with workflow_ref runs a sub-workflow per item."""
+    sub_wf = tmp_path / "sub.yaml"
+    sub_wf.write_text(
+        "schema_version: checkpointflow/v1\n"
+        "workflow:\n"
+        "  id: sub\n"
+        "  inputs:\n"
+        "    type: object\n"
+        "  steps:\n"
+        "    - id: step1\n"
+        "      kind: cli\n"
+        "      command: echo hello\n"
+        "    - id: done\n"
+        "      kind: end\n"
+    )
+    step = ForeachStep.model_validate(
+        {
+            "id": "loop",
+            "kind": "foreach",
+            "items": "inputs.items",
+            "workflow_ref": str(sub_wf),
+        }
+    )
+    result = execute(step, _ctx(tmp_path, inputs={"items": ["a", "b"]}))
+    assert result.success is True
+    assert result.outputs is not None
+    assert len(result.outputs["iterations"]) == 2

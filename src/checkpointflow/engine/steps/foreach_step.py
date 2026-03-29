@@ -48,11 +48,39 @@ def execute(step: ForeachStep, ctx: RunContext) -> StepResult:
             error_message=f"Step '{step.id}' items must be a list, got {type(items).__name__}",
         )
 
+    # If workflow_ref is set, delegate each iteration to the sub-workflow runner
+    if step.workflow_ref:
+        from checkpointflow.engine.steps import workflow_ref_step
+        from checkpointflow.models.workflow import WorkflowRefStep
+
+        ref_results: list[dict[str, Any]] = []
+        for i, item in enumerate(items):
+            sub_step = WorkflowRefStep.model_validate(
+                {
+                    "id": f"{step.id}_iter{i}",
+                    "kind": "workflow",
+                    "workflow_ref": step.workflow_ref,
+                    "inputs": {"_foreach_item": item, "_foreach_index": i},
+                }
+            )
+            sub_ctx = RunContext(
+                run_id=ctx.run_id,
+                inputs={**ctx.inputs, "_foreach_item": item, "_foreach_index": i},
+                step_outputs=ctx.step_outputs,
+                run_dir=ctx.run_dir,
+                defaults=ctx.defaults,
+            )
+            result = workflow_ref_step.execute(sub_step, sub_ctx)
+            if not result.success:
+                return result
+            ref_results.append(result.outputs or {})
+        return StepResult(success=True, outputs={"iterations": ref_results})
+
     if not step.body:
         return StepResult(
             success=False,
             error_code=ErrorCode.ERR_STEP_FAILED,
-            error_message=f"Step '{step.id}' has no body steps defined.",
+            error_message=f"Step '{step.id}' has no body or workflow_ref defined.",
         )
 
     # Parse body steps

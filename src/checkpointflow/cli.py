@@ -17,6 +17,7 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
     pretty_exceptions_enable=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
@@ -37,6 +38,7 @@ def callback(
         bool,
         typer.Option(
             "--version",
+            "-v",
             help="Show the installed checkpointflow version.",
             callback=_version_callback,
             is_eager=True,
@@ -147,13 +149,16 @@ def run(
     ],
     input_data: Annotated[
         str,
-        typer.Option("--input", help="Input JSON (inline or @file path)."),
-    ],
+        typer.Option("--input", help="Input JSON (inline, @file path, or - for stdin)."),
+    ] = "{}",
 ) -> None:
     """Run a workflow from start to completion or next wait point."""
+    import sys
+
     from checkpointflow.engine.runner import run_workflow
 
-    envelope = run_workflow(file, input_data, base_dir=_get_base_dir())
+    raw = sys.stdin.read() if input_data == "-" else input_data
+    envelope = run_workflow(file, raw, base_dir=_get_base_dir())
     _emit(envelope)
 
 
@@ -176,13 +181,16 @@ def resume(
     ],
     input_data: Annotated[
         str,
-        typer.Option("--input", help="Event input JSON (inline or @file)."),
+        typer.Option("--input", help="Event input JSON (inline, @file, or - for stdin)."),
     ],
 ) -> None:
     """Resume a waiting run with an event payload."""
+    import sys
+
     from checkpointflow.engine.runner import resume_workflow
 
-    envelope = resume_workflow(run_id, event, input_data, base_dir=_get_base_dir())
+    raw = sys.stdin.read() if input_data == "-" else input_data
+    envelope = resume_workflow(run_id, event, raw, base_dir=_get_base_dir())
     _emit(envelope)
 
 
@@ -220,6 +228,9 @@ workflow:
   id: my_workflow
   name: My Workflow
   version: 0.1.0
+
+  defaults:
+    shell: bash
 
   inputs:
     type: object
