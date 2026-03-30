@@ -57,4 +57,18 @@ export const api = {
       throw new Error(body.error ?? `Delete failed: ${res.status}`);
     }
   },
+
+  async bulkDeleteRuns(
+    runIds: string[]
+  ): Promise<{ deleted: string[]; skipped: string[] }> {
+    const res = await fetch(`${BASE}/runs/bulk-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_ids: runIds }),
+    });
+    if (!res.ok) {
+      throw new Error(`Bulk delete failed: ${res.status}`);
+    }
+    return res.json();
+  },
 };

@@ -71,6 +71,21 @@ def delete_run(store: Store, run_id: str) -> dict[str, Any] | None:
     return {"deleted": True, "run_id": run_id}
 
 
+def bulk_delete_runs(store: Store, run_ids: list[str]) -> dict[str, list[str]]:
+    """Delete multiple runs. Skips runs that are not found or are still active."""
+    from checkpointflow.persistence.store import PersistenceError
+
+    deleted: list[str] = []
+    skipped: list[str] = []
+    for run_id in run_ids:
+        try:
+            store.delete_run(run_id)
+            deleted.append(run_id)
+        except PersistenceError:
+            skipped.append(run_id)
+    return {"deleted": deleted, "skipped": skipped}
+
+
 def get_step_output(store: Store, run_id: str, step_id: str, stream: str) -> str | None:
     """Read stdout or stderr for a step."""
     run_dir = store.base_dir / "runs" / run_id / stream

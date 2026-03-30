@@ -13,6 +13,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from checkpointflow.gui.api import (
+    bulk_delete_runs,
     delete_run,
     discover_workflows,
     get_run_detail,
@@ -56,6 +57,12 @@ def create_app(base_dir: Path | None = None) -> Starlette:
             return _json({"error": "Run not found"}, 404)
         return _json(result)
 
+    async def api_bulk_delete(request: Request) -> Response:
+        body = await request.json()
+        run_ids: list[str] = body.get("run_ids", [])
+        result = bulk_delete_runs(store, run_ids)
+        return _json(result)
+
     async def api_step_stream(request: Request) -> Response:
         run_id = request.path_params["run_id"]
         step_id = request.path_params["step_id"]
@@ -92,6 +99,7 @@ def create_app(base_dir: Path | None = None) -> Starlette:
         Route("/api/runs", api_runs),
         Route("/api/runs/{run_id}", api_run_detail),
         Route("/api/runs/{run_id}", api_delete_run, methods=["DELETE"]),
+        Route("/api/runs/bulk-delete", api_bulk_delete, methods=["POST"]),
         Route("/api/runs/{run_id}/steps/{step_id}/{stream}", api_step_stream),
         Route("/api/workflows", api_workflows),
     ]
