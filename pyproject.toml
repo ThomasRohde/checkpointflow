@@ -1,9 +1,10 @@
 [project]
 name = "checkpointflow"
-version = "1.7.2"
+version = "1.8.0"
 description = "CLI toolchain for authoring and running deterministic, resumable agent workflows."
 readme = "README.md"
-requires-python = ">=3.13"
+license = { text = "MIT" }
+requires-python = ">=3.11"
 dependencies = [
     "jsonschema>=4.26.0",
     "pydantic>=2.12.5",
@@ -32,7 +33,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
 
@@ -43,7 +44,7 @@ select = ["B", "E", "F", "I", "PTH", "RET", "RUF", "SIM", "UP"]
 docstring-code-format = true
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.11"
 strict = true
 packages = ["checkpointflow"]
 plugins = ["pydantic.mypy"]
