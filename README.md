@@ -33,7 +33,7 @@ Most agent workflows break down in the same places:
 ## What You Get
 
 - A narrow, predictable runtime contract that is easy for agents to drive.
-- Stable CLI commands for validate, run, resume, inspect, status, cancel, guide, and gui.
+- Stable CLI commands for validate, run, resume, inspect, status, cancel, flows, guide, and gui.
 - Explicit pause/resume semantics instead of hidden conversational continuation.
 - Deterministic control flow driven by persisted inputs and step outputs.
 - A default user-scoped state store at `~/.checkpointflow/`.
@@ -239,6 +239,8 @@ The workflow remains the same because the runtime contract remains the same.
 cpf init
 cpf guide
 cpf validate -f workflow.yaml
+cpf flows                             # list available workflows
+cpf flows --detail <id-or-name>       # show details for one workflow
 cpf run -f workflow.yaml --input @input.json
 cpf resume --run-id <run_id> --event <event_name> --input @event.json
 cpf status --run-id <run_id>
@@ -296,6 +298,20 @@ This makes workflows easy to keep in repos, temp directories, shared folders, or
 
 `40` is not a failure. It means the workflow is paused and ready to be resumed with an explicit event payload.
 
+## Why Not X?
+
+| Tool | What it does well | Where checkpointflow differs |
+|------|-------------------|------------------------------|
+| **Bash scripts** | Simple, ubiquitous | No pause/resume, no schema validation, no structured handoff between operators |
+| **GitHub Actions / CI** | Great for build pipelines | Tied to Git events; no interactive pause for human/agent judgment mid-run |
+| **AWS Step Functions** | Durable, scalable orchestration | Cloud-locked, heavyweight; overkill for local agent-driven workflows |
+| **Temporal** | Long-running workflows with retries | Requires a server cluster; designed for distributed systems, not CLI-driven agent loops |
+| **Arazzo (OpenAPI Workflows)** | API call sequencing with OpenAPI | Focused on HTTP orchestration; no CLI steps, no agent audience, no local state |
+| **LangGraph / CrewAI** | Multi-agent orchestration | State lives in memory/chat; implicit continuation; hard to validate, resume, or hand off |
+| **Plain prompt chaining** | Zero setup | State trapped in context window; no durability, no explicit pause, no schema contract |
+
+checkpointflow occupies a specific gap: **deterministic orchestration with explicit pause/resume, schema-validated handoff, and agent-agnostic driving through a local CLI.** It is not trying to replace cloud workflow engines or agent frameworks. It is the layer that makes a workflow portable, resumable, and auditable without requiring infrastructure.
+
 ## Who It Is For
 
 `checkpointflow` is a good fit if you want to:
@@ -338,4 +354,4 @@ GitHub Actions enforces the same quality gate in CI:
 
 ## License
 
-Private repository.
+MIT

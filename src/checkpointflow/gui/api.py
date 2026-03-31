@@ -86,8 +86,15 @@ def bulk_delete_runs(store: Store, run_ids: list[str]) -> dict[str, list[str]]:
     return {"deleted": deleted, "skipped": skipped}
 
 
+def _safe_path_component(value: str) -> bool:
+    """Return True if *value* is safe to use as a single path component."""
+    return ".." not in value and "/" not in value and "\\" not in value
+
+
 def get_step_output(store: Store, run_id: str, step_id: str, stream: str) -> str | None:
     """Read stdout or stderr for a step."""
+    if not (_safe_path_component(run_id) and _safe_path_component(step_id)):
+        return None
     run_dir = store.base_dir / "runs" / run_id / stream
     path = run_dir / f"{step_id}.txt"
     if path.exists():
@@ -96,41 +103,28 @@ def get_step_output(store: Store, run_id: str, step_id: str, stream: str) -> str
 
 
 def discover_workflows(base_dir: Path) -> list[dict[str, str]]:
-    """Find workflow YAML files in cwd and base_dir."""
-    found: list[dict[str, str]] = []
-    seen: set[str] = set()
+    """Find workflow YAML files in cwd/.checkpointflow and base_dir.
 
-    search_dirs = [
-        ("cwd", Path.cwd()),
-        ("home", base_dir),
-    ]
+    Delegates to the shared :func:`checkpointflow.discovery.discover_workflows`
+    and converts results to the dict format expected by the GUI API.
+    """
+    from checkpointflow.discovery import discover_workflows as _discover
 
-    for source, directory in search_dirs:
-        if not directory.exists():
-            continue
-        for pattern in ("*.yaml", "*.yml", "**/*.yaml", "**/*.yml"):
-            for p in directory.glob(pattern):
-                resolved = str(p.resolve())
-                if resolved in seen:
-                    continue
-                # Quick check: does it look like a checkpointflow file?
-                try:
-                    text = p.read_text(encoding="utf-8", errors="replace")
-                    if "checkpointflow/v1" not in text:
-                        continue
-                except OSError:
-                    continue
-                seen.add(resolved)
-                found.append(
-                    {
-                        "path": resolved,
-                        "name": p.stem,
-                        "source": source,
-                        "relative": str(p.relative_to(directory)),
-                    }
-                )
+    cwd = Path.cwd()
+    search_dirs = [cwd / ".checkpointflow", base_dir]
 
-    return found
+    results: list[dict[str, str]] = []
+    for wf in _discover(search_dirs):
+        source = "cwd" if wf.path.resolve().is_relative_to(cwd.resolve()) else "home"
+        results.append(
+            {
+                "path": str(wf.path.resolve()),
+                "name": wf.path.stem,
+                "source": source,
+                "relative": wf.path.name,
+            }
+        )
+    return results
 
 
 def parse_workflow(path: str) -> dict[str, Any] | None:

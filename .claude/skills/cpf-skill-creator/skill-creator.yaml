@@ -1,0 +1,473 @@
+schema_version: checkpointflow/v1
+workflow:
+  id: skill_creator
+  name: Skill Creator
+  version: 1.0.0
+  description: >
+    Creates or improves Claude Code skills through structured iteration.
+    Captures intent, drafts the skill with test cases, runs evals with
+    grading and benchmarking, collects human feedback, and iterates until
+    ship-ready. Uses Anthropic skill-creator utilities for grading,
+    benchmarking, and viewer generation.
+
+  defaults:
+    shell: bash
+
+  inputs:
+    type: object
+    required: [skill_name, intent]
+    properties:
+      skill_name:
+        type: string
+        description: Name for the skill (kebab-case)
+        examples: ["pdf-processor", "code-reviewer", "deploy-helper"]
+      intent:
+        type: string
+        description: What the skill should do, when it should trigger, and expected output
+        examples:
+          - "A skill that converts markdown to professionally formatted PDFs with TOC"
+          - "A skill that reviews Python code for security vulnerabilities"
+      existing_skill_path:
+        type: string
+        description: Path to an existing skill to improve (omit when creating from scratch)
+      target_dir:
+        type: string
+        description: Directory for the skill (defaults to .claude/skills/)
+
+  steps:
+    # ── Phase 1: Capture Intent ─────────────────────────────
+    - id: capture_intent
+      kind: await_event
+      audience: user
+      event_name: skill_intent
+      name: "Human: Refine Skill Intent"
+      prompt: |
+        Creating skill: "${inputs.skill_name}"
+        Initial intent: ${inputs.intent}
+
+        Let's refine the scope before drafting.
+
+        1. What should this skill enable Claude to do?
+        2. What user phrases or contexts should trigger it?
+        3. What is the expected output format?
+        4. Should we set up test cases and benchmarks?
+           (Recommended for skills with objectively verifiable outputs)
+      input_schema:
+        type: object
+        required: [intent_refined, trigger_context, run_evals]
+        properties:
+          intent_refined:
+            type: string
+            description: Refined description of what the skill does
+          trigger_context:
+            type: string
+            description: Phrases and contexts that should trigger the skill
+          output_format:
+            type: string
+            description: Expected output format (files, text, structured data)
+          run_evals:
+            type: boolean
+            description: Whether to create and run test evaluations
+          notes:
+            type: string
+            description: Any additional constraints or requirements
+
+    # ── Phase 2: Research & Draft ───────────────────────────
+    - id: research_and_draft
+      kind: await_event
+      audience: agent
+      event_name: skill_drafted
+      name: "Agent: Research & Draft Skill"
+      prompt: |
+        Create the skill "${inputs.skill_name}" based on the refined intent.
+
+        Intent: ${steps.capture_intent.outputs.intent_refined}
+        Trigger context: ${steps.capture_intent.outputs.trigger_context}
+        Output format: ${steps.capture_intent.outputs.output_format}
+        Run evals: ${steps.capture_intent.outputs.run_evals}
+        User notes: ${steps.capture_intent.outputs.notes}
+
+        Target directory: ${inputs.target_dir}
+        (default: .claude/skills/${inputs.skill_name}/)
+
+        Steps:
+        1. Research: check available MCPs, look for similar skills or patterns,
+           read relevant docs. Use subagents for parallel research if available.
+
+        2. Write the SKILL.md following these principles:
+           - Description field is the primary triggering mechanism. Make it
+             slightly "pushy" — include both what the skill does AND specific
+             contexts. Skills tend to under-trigger, so be generous.
+           - Use progressive disclosure: metadata (~100 words), SKILL.md body
+             (<500 lines), bundled resources (unlimited).
+           - Prefer imperative form. Explain WHY, not just WHAT.
+           - Include examples for output formats.
+           - If the skill needs scripts or reference files, create them in
+             scripts/ or references/ subdirectories.
+
+        3. If evals requested: create 2-3 realistic test prompts — the kind
+           of thing a real user would actually say. Save to
+           <skill-name>-workspace/evals/evals.json using this schema:
+           {
+             "skill_name": "<name>",
+             "evals": [
+               {"id": 1, "prompt": "...", "expected_output": "...", "files": []}
+             ]
+           }
+
+        Save the skill to disk and report what you created.
+      input_schema:
+        type: object
+        required: [skill_path, draft_summary]
+        properties:
+          skill_path:
+            type: string
+            description: Path where the SKILL.md was written
+          workspace_path:
+            type: string
+            description: Path to the workspace directory
+          test_count:
+            type: number
+            description: Number of test cases created (0 if evals skipped)
+          draft_summary:
+            type: string
+            description: Summary of the skill and key design decisions
+          bundled_files:
+            type: array
+            items: { type: string }
+            description: Additional files created (scripts, references)
+
+    # ── Phase 3: Review Draft ───────────────────────────────
+    - id: review_draft
+      kind: await_event
+      audience: user
+      event_name: draft_review
+      name: "Human: Review Skill Draft"
+      prompt: |
+        Skill draft for "${inputs.skill_name}" is ready.
+
+        Path: ${steps.research_and_draft.outputs.skill_path}
+        Summary: ${steps.research_and_draft.outputs.draft_summary}
+        Test cases: ${steps.research_and_draft.outputs.test_count}
+        Bundled files: ${steps.research_and_draft.outputs.bundled_files}
+
+        Please review the SKILL.md file and test cases.
+        Approve to proceed with testing, request revisions, or cancel.
+      input_schema:
+        type: object
+        required: [decision]
+        properties:
+          decision:
+            type: string
+            enum: [approve, revise, cancel]
+          feedback:
+            type: string
+            description: Feedback or changes to make
+      transitions:
+        - when: ${event.decision == "cancel"}
+          next: cancelled
+        - when: ${event.decision == "revise"}
+          next: research_and_draft
+
+    # ── Phase 4: Run Tests & Grade ──────────────────────────
+    - id: run_and_grade
+      kind: await_event
+      audience: agent
+      event_name: test_results
+      name: "Agent: Run Tests & Grade"
+      prompt: |
+        Run test evaluations for skill "${inputs.skill_name}".
+
+        Skill path: ${steps.research_and_draft.outputs.skill_path}
+        Workspace: ${steps.research_and_draft.outputs.workspace_path}
+        Test count: ${steps.research_and_draft.outputs.test_count}
+
+        Reference skill-creator utilities are at:
+        ~/.claude/plugins/cache/claude-plugins-official/skill-creator/unknown/skills/skill-creator/
+
+        For each test case in evals/evals.json:
+
+        1. Spawn two subagents in the SAME turn:
+           - With-skill: give it the skill path and the test prompt
+           - Baseline: same prompt, no skill (or old skill if improving)
+           Save outputs to workspace/iteration-<N>/eval-<ID>/with_skill/outputs/
+           and without_skill/outputs/ respectively.
+
+        2. While tests run, draft quantitative assertions for each test case.
+           Update evals.json with the assertions field.
+
+        3. When runs complete, capture timing data (total_tokens, duration_ms)
+           from task notifications into timing.json in each run directory.
+
+        4. Grade each run:
+           - Read agents/grader.md from the reference path for instructions
+           - Save grading.json in each run directory
+           - Use fields: text, passed, evidence (not name/met/details)
+
+        5. Aggregate into benchmark:
+           python -m scripts.aggregate_benchmark <workspace>/iteration-<N> \
+             --skill-name ${inputs.skill_name}
+           (run from the reference skill-creator directory)
+
+        6. Launch the eval viewer:
+           python <ref-path>/eval-viewer/generate_review.py \
+             <workspace>/iteration-<N> \
+             --skill-name "${inputs.skill_name}" \
+             --benchmark <workspace>/iteration-<N>/benchmark.json
+           For iteration 2+, add: --previous-workspace <workspace>/iteration-<N-1>
+
+        7. Tell the user the viewer is open and they should review both the
+           Outputs tab (qualitative) and Benchmark tab (quantitative).
+
+        If test_count is 0 (evals skipped), report that and skip to results.
+      input_schema:
+        type: object
+        required: [iteration, tests_ran]
+        properties:
+          iteration:
+            type: number
+            description: Which iteration this is (1, 2, 3...)
+          tests_ran:
+            type: boolean
+            description: Whether tests were actually executed
+          viewer_launched:
+            type: boolean
+          pass_rate_with_skill:
+            type: number
+            description: Overall pass rate with the skill (0-1)
+          pass_rate_baseline:
+            type: number
+            description: Overall pass rate without the skill (0-1)
+          benchmark_summary:
+            type: string
+            description: Key findings from the benchmark
+
+    # ── Phase 5: User Reviews Results ───────────────────────
+    - id: user_review_results
+      kind: await_event
+      audience: user
+      event_name: iteration_decision
+      name: "Human: Review Results & Decide"
+      prompt: |
+        Test results for "${inputs.skill_name}" (iteration ${steps.run_and_grade.outputs.iteration}):
+
+        Tests ran: ${steps.run_and_grade.outputs.tests_ran}
+        Pass rate (with skill): ${steps.run_and_grade.outputs.pass_rate_with_skill}
+        Pass rate (baseline): ${steps.run_and_grade.outputs.pass_rate_baseline}
+        Benchmark: ${steps.run_and_grade.outputs.benchmark_summary}
+
+        Review the outputs in the viewer, then decide:
+        - iterate: Improve the skill based on feedback, then retest
+        - optimize: Skill is good — optimize the description for better triggering
+        - ship: Ship as-is without description optimization
+      input_schema:
+        type: object
+        required: [decision]
+        properties:
+          decision:
+            type: string
+            enum: [iterate, optimize, ship]
+          feedback:
+            type: string
+            description: What to improve (if iterating)
+
+    # ── Phase 6: Route by Decision ──────────────────────────
+    - id: iterate_route
+      kind: switch
+      name: "System: Route by Decision"
+      cases:
+        - when: 'steps.user_review_results.outputs.decision == "iterate"'
+          next: improve_skill
+        - when: 'steps.user_review_results.outputs.decision == "optimize"'
+          next: optimize_description
+        - when: 'steps.user_review_results.outputs.decision == "ship"'
+          next: package_and_present
+      default: package_and_present
+
+    # ── Phase 7: Improve Skill (iterate loop) ───────────────
+    - id: improve_skill
+      kind: await_event
+      audience: agent
+      event_name: skill_improved
+      name: "Agent: Improve Skill"
+      prompt: |
+        Improve skill "${inputs.skill_name}" based on user feedback.
+
+        Skill path: ${steps.research_and_draft.outputs.skill_path}
+        Workspace: ${steps.research_and_draft.outputs.workspace_path}
+        Current iteration: ${steps.run_and_grade.outputs.iteration}
+        User feedback: ${steps.user_review_results.outputs.feedback}
+
+        Read feedback.json from the workspace for detailed per-test-case notes.
+        Empty feedback means the user thought it was fine. Focus improvements
+        on test cases where the user had specific complaints.
+
+        Improvement philosophy:
+        - Generalize from the feedback. Don't overfit to the test examples.
+        - Keep the prompt lean. Remove instructions that aren't pulling weight.
+        - Explain the WHY. Today's LLMs are smart — reasoning works better
+          than rigid ALWAYS/NEVER rules.
+        - Look for repeated work. If every test run independently wrote similar
+          helper scripts, bundle that script into the skill.
+        - Write a draft revision, then look at it fresh and improve further.
+
+        Save the updated SKILL.md and report changes.
+      input_schema:
+        type: object
+        required: [changes_made, iteration]
+        properties:
+          changes_made:
+            type: string
+            description: Summary of what changed and why
+          iteration:
+            type: number
+            description: The next iteration number
+
+    # Route back to testing after improvement
+    - id: route_to_retest
+      kind: switch
+      name: "System: Route back to testing"
+      cases:
+        - when: 'steps.improve_skill.outputs.iteration > 0'
+          next: run_and_grade
+      default: run_and_grade
+
+    # ── Phase 8: Optimize Description ───────────────────────
+    - id: optimize_description
+      kind: await_event
+      audience: agent
+      event_name: description_optimized
+      name: "Agent: Optimize Trigger Description"
+      prompt: |
+        Optimize the description field of skill "${inputs.skill_name}" for
+        better triggering accuracy.
+
+        Skill path: ${steps.research_and_draft.outputs.skill_path}
+
+        Reference utilities at:
+        ~/.claude/plugins/cache/claude-plugins-official/skill-creator/unknown/skills/skill-creator/
+
+        Steps:
+        1. Generate 20 trigger eval queries — a mix of should-trigger (8-10)
+           and should-not-trigger (8-10). Make them realistic: specific file
+           paths, personal context, column names, casual speech, typos.
+           Focus on edge cases, not obvious matches.
+
+           Bad: "Format this data" (too vague)
+           Good: "ok so my boss sent me this xlsx file called Q4 sales..."
+
+           For should-not-trigger: use near-misses that share keywords but
+           need something different. Avoid obviously irrelevant queries.
+
+        2. Present the eval set to the user using the HTML template:
+           - Read assets/eval_review.html from the reference path
+           - Replace __EVAL_DATA_PLACEHOLDER__ with the JSON array
+           - Replace __SKILL_NAME_PLACEHOLDER__ and __SKILL_DESCRIPTION_PLACEHOLDER__
+           - Write to a temp file and open it
+
+        3. After the user reviews and exports, run the optimization loop:
+           python -m scripts.run_loop \
+             --eval-set <path-to-eval-set.json> \
+             --skill-path <skill-path> \
+             --model <current-model-id> \
+             --max-iterations 5 --verbose
+           (run from the reference skill-creator directory)
+
+        4. Apply the best_description from the JSON output to the SKILL.md.
+
+        Report before/after descriptions and scores.
+      input_schema:
+        type: object
+        required: [description_before, description_after]
+        properties:
+          description_before:
+            type: string
+          description_after:
+            type: string
+          train_score:
+            type: number
+          test_score:
+            type: number
+          notes:
+            type: string
+
+    # Review optimized description
+    - id: review_optimization
+      kind: await_event
+      audience: user
+      event_name: optimization_review
+      name: "Human: Review Optimized Description"
+      prompt: |
+        Description optimization for "${inputs.skill_name}":
+
+        Before: ${steps.optimize_description.outputs.description_before}
+        After: ${steps.optimize_description.outputs.description_after}
+
+        Train score: ${steps.optimize_description.outputs.train_score}
+        Test score: ${steps.optimize_description.outputs.test_score}
+        Notes: ${steps.optimize_description.outputs.notes}
+
+        Accept the optimized description, or tweak and re-run?
+      input_schema:
+        type: object
+        required: [decision]
+        properties:
+          decision:
+            type: string
+            enum: [accept, tweak]
+          notes:
+            type: string
+      transitions:
+        - when: ${event.decision == "tweak"}
+          next: optimize_description
+
+    # ── Phase 9: Package ────────────────────────────────────
+    - id: package_and_present
+      kind: await_event
+      audience: agent
+      event_name: skill_packaged
+      name: "Agent: Package Skill"
+      prompt: |
+        Package skill "${inputs.skill_name}" for distribution.
+
+        Skill path: ${steps.research_and_draft.outputs.skill_path}
+
+        Reference utilities at:
+        ~/.claude/plugins/cache/claude-plugins-official/skill-creator/unknown/skills/skill-creator/
+
+        Run: python -m scripts.package_skill <skill-directory>
+        (from the reference skill-creator directory)
+
+        If the package_skill script is not available or fails, skip packaging
+        and just report the skill path for manual installation.
+
+        Report the final skill location and any .skill file created.
+      input_schema:
+        type: object
+        required: [skill_path, packaged]
+        properties:
+          skill_path:
+            type: string
+            description: Final path to the skill directory
+          skill_file_path:
+            type: string
+            description: Path to the .skill file (if created)
+          packaged:
+            type: boolean
+
+    # ── Terminal States ─────────────────────────────────────
+    - id: done
+      kind: end
+      result:
+        status: complete
+        skill_name: ${inputs.skill_name}
+        skill_path: ${steps.package_and_present.outputs.skill_path}
+        message: >
+          Skill "${inputs.skill_name}" created and ready to use.
+
+    - id: cancelled
+      kind: end
+      result:
+        status: cancelled
+        skill_name: ${inputs.skill_name}
+        message: Skill creation cancelled.

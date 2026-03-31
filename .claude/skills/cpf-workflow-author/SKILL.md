@@ -25,7 +25,12 @@ If you need to see existing examples in the project, check `examples/*.yaml` in 
    - A point where execution must pause for human/agent input -> `await_event`
    - A terminal outcome -> `end`
 
-3. **Write the YAML file.** Place it in the location the user specifies, or default to `examples/<workflow-id>.yaml` if inside the checkpointflow repo.
+3. **Decide where to put the file.** If the user specifies a path, use it. Otherwise, prompt the user to choose:
+   - **Local** (`.checkpointflow/<id>.yaml`) — scoped to the current project, checked into the repo
+   - **Global** (`~/.checkpointflow/<id>.yaml`) — available everywhere via `cpf flows`
+   - **Examples** (`examples/<id>.yaml`) — only offer this if inside the checkpointflow repo itself
+
+   Skip the question when the location is obvious from context (e.g. "add a global workflow", "create a workflow in this repo", or an explicit file path).
 
 4. **Validate immediately** after writing:
    ```bash
@@ -33,7 +38,7 @@ If you need to see existing examples in the project, check `examples/*.yaml` in 
    ```
    If validation fails, fix the YAML and re-validate before telling the user the workflow is ready.
 
-5. **Offer to run it** if the user seems ready. When the workflow hits an `await_event` step (exit code 40), use `AskUserQuestion` to collect the required input, then `cpf resume` to continue.
+5. **Offer to run it** if the user seems ready. When the workflow hits an `await_event` step (exit code 40), collect the required input via a structured prompt, then `cpf resume` to continue.
 
 ## Workflow file structure
 
@@ -429,7 +434,7 @@ If the user wants to run it:
 cpf run -f <path> --input '{"key": "value"}'
 ```
 
-When a run pauses at an `await_event` (exit code 40), the JSON envelope contains a `wait` block with the prompt, input schema, and resume command. Use `AskUserQuestion` to gather the input from the user, then resume:
+When a run pauses at an `await_event` (exit code 40), the JSON envelope contains a `wait` block with the prompt, input schema, and resume command. Gather the input from the user via a structured prompt, then resume:
 ```bash
 cpf resume --run-id <id> --event <event_name> --input '{"key": "value"}'
 ```

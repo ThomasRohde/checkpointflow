@@ -292,6 +292,15 @@ cpf validate -f workflow.yaml         # validate against the schema
 cpf guide                             # print this guide
 ```
 
+Discovery:
+
+```bash
+cpf flows                             # list available workflows by name
+cpf flows --detail <id-or-name>       # show details for a specific workflow
+```
+
+`cpf flows` searches `.checkpointflow/` in the current directory and `~/.checkpointflow/` for `*.yaml` files. The plain listing prints one workflow name per line; `--detail` shows the id, version, description, and file path for the matching workflow.
+
 Execution and inspection:
 
 ```bash

@@ -345,5 +345,43 @@ def gui(
     run_server(port=port, base_dir=_get_base_dir())
 
 
+@app.command()
+def flows(
+    detail: Annotated[
+        str | None,
+        typer.Option("--detail", help="Show details for a specific workflow (by id or name)."),
+    ] = None,
+) -> None:
+    """List available workflows, or show details for one."""
+    from checkpointflow.discovery import discover_workflows
+
+    found = discover_workflows()
+
+    if not found:
+        typer.echo("No workflows found.")
+        raise typer.Exit()
+
+    if detail is not None:
+        query = detail.lower()
+        match = next(
+            (wf for wf in found if wf.workflow_id.lower() == query or wf.name.lower() == query),
+            None,
+        )
+        if match is None:
+            typer.echo(f'No workflow matching "{detail}".')
+            raise typer.Exit(code=1)
+        typer.echo(match.name)
+        if match.workflow_id:
+            typer.echo(f"  id: {match.workflow_id}")
+        if match.version:
+            typer.echo(f"  version: {match.version}")
+        if match.description:
+            typer.echo(f"  {match.description.strip()}")
+        typer.echo(f"  run: cpf run -f {match.path}")
+    else:
+        for wf in found:
+            typer.echo(f"{wf.workflow_id}  {wf.name}" if wf.workflow_id else wf.name)
+
+
 def main() -> None:
     app()

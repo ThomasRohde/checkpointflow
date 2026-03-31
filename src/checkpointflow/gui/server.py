@@ -74,10 +74,15 @@ def create_app(base_dir: Path | None = None) -> Starlette:
             return _json({"error": "Not found"}, 404)
         return PlainTextResponse(content)
 
+    allowed_dirs = [Path.cwd() / ".checkpointflow", resolved_base]
+
     async def api_workflows(request: Request) -> Response:
         path = request.query_params.get("path")
         if path:
-            parsed = parse_workflow(path)
+            resolved = Path(path).resolve()
+            if not any(resolved.is_relative_to(d.resolve()) for d in allowed_dirs if d.is_dir()):
+                return _json({"error": "Path not in allowed workflow directories"}, 403)
+            parsed = parse_workflow(str(resolved))
             if parsed is None:
                 return _json({"error": "Could not parse workflow"}, 404)
             return _json(parsed)
@@ -116,7 +121,14 @@ def create_app(base_dir: Path | None = None) -> Starlette:
 
 def run_server(port: int = 8420, base_dir: Path | None = None) -> None:
     """Start the GUI server."""
+    import signal
+    import sys
+
     import uvicorn
+
+    # On Windows, reset SIGINT to default so Ctrl-C actually terminates the process.
+    if sys.platform == "win32":
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     app = create_app(base_dir=base_dir)
     url = f"http://localhost:{port}"

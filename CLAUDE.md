@@ -27,7 +27,7 @@ uv build                     # Build distribution
 
 ## Code Style
 
-- Python 3.13+ (target-version in ruff and mypy).
+- Python 3.11+ (target-version in ruff and mypy).
 - Line length: 100 characters.
 - mypy strict mode with `pydantic.mypy` plugin — all code must pass strict type checking.
 - Ruff lint rules: B, E, F, I, PTH, RET, RUF, SIM, UP.
