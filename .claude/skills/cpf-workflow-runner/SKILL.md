@@ -88,7 +88,15 @@ The detail output tells you exactly what inputs to collect and gives you the `cp
 
 ### Step 2: Collect inputs and execute
 
-Use the inputs section from `cpf flows --detail` to collect values from the user via structured prompts. For each input property, build prompt options using this priority:
+Use the inputs section from `cpf flows --detail` to collect values from the user via structured prompts. **Read the `description` field on each input** — it explains what the value should be and often includes examples or hints (e.g., "Directory containing the tools/ subdirectory").
+
+For inputs you can infer from context, do so without asking:
+- `repo_dir` → current working directory
+- `artifact_dir` → create a temp directory
+- `author` → `git config user.name`
+- Paths referencing the current project → resolve from the working directory
+
+Only prompt the user for inputs that are genuinely ambiguous. For each prompted input, build options using this priority:
 
 1. **`enum` values** → one option per enum value (the user picks one)
 2. **`type: boolean`** → two options: "Yes" / "No"
@@ -114,7 +122,7 @@ Based on `exit_code`:
 | 0 | Completed | Show the `result` to the user. Done. |
 | 40 | Waiting for input | Enter the interactive loop (dispatches on audience). |
 | 10 | Validation error | Show `error.message`. Check inputs match the schema. |
-| 30 | Step failed | Show which step failed and why. Offer to inspect with `cpf inspect`. |
+| 30 | Step failed | Immediately run `cpf inspect --run-id <id>`, read the `stderr_path` from the failed step result, and diagnose the root cause before reporting to the user. |
 | 80 | Unsupported step | Tell the user this step kind isn't implemented yet. |
 | Other | Error | Show the error and suggest next steps. |
 
@@ -191,6 +199,31 @@ cpf gui                    # opens http://localhost:8420
 cpf gui --port 9000        # custom port
 ```
 
+## Never modify workflow files during an active run
+
+cpf checksums the workflow YAML when a run starts and verifies it on every resume. If you edit the workflow file while a run is in progress, the next `cpf resume` will fail with `ERR_VALIDATION_WORKFLOW` ("Workflow file has changed since the run started"). This forces you to abandon the run and start over.
+
+If you need to fix the workflow YAML mid-session, finish or cancel the active run first.
+
+## Parallel agents with sequential callbacks
+
+Some workflows have multiple sequential `await_event` steps that are all `audience: "agent"` — for example, 4 specialist reviews that each get their own callback. The optimal pattern:
+
+1. **Launch all agents in parallel** (background agents) when you first see the sequence.
+2. **Write event JSON files** as each agent completes — don't hold results in memory.
+3. **Resume callbacks sequentially** as the workflow reaches each one, using the pre-written files.
+
+Agents may finish out of order. That's fine — queue their results in files and feed them to the workflow in the order it expects.
+
+## Windows path handling
+
+On Windows, backslashes in file paths break inline JSON (`--input '{"file": "C:\\..."}'` causes JSON parse errors). Two options:
+
+- **Use `@file` references** (preferred): write event JSON to a file, then `--input @path/to/event.json`
+- **Use forward slashes** in inline JSON: `"C:/Users/thoma/..."` — cpf and Python accept these on Windows
+
+When using `@file`, make sure you know the actual Windows path — different tools may resolve `/tmp/` to different locations (e.g., `C:\tmp\` vs `C:\Users\...\AppData\Local\Temp\`).
+
 ## Tips
 
 - **Agent pauses are auto-resume** — never present them to the user. Do the work silently and resume.
@@ -200,4 +233,4 @@ cpf gui --port 9000        # custom port
 - Exit code 40 is not an error. Don't treat it as a failure or apologize for it.
 - When showing results to the user, format them nicely — don't dump raw JSON unless they ask for it.
 - If a workflow has multiple sequential `await_event` steps (like a quiz), keep the loop going smoothly without re-explaining the process each time.
-- The `--input` flag accepts either inline JSON (`'{"key": "value"}'`) or a file reference (`@path/to/file.json`). Prefer inline for simple inputs.
+- The `--input` flag accepts either inline JSON (`'{"key": "value"}'`) or a file reference (`@path/to/file.json`). Prefer `@file` for any input containing file paths or long strings.
