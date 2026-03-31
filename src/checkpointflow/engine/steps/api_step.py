@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -14,10 +15,7 @@ from checkpointflow.models.workflow import ApiStep
 
 def execute(step: ApiStep, ctx: RunContext) -> StepResult:
     """Execute an HTTP request and return the response as outputs."""
-    eval_ctx: dict[str, Any] = {
-        "inputs": ctx.inputs,
-        "steps": {sid: {"outputs": outs} for sid, outs in ctx.step_outputs.items()},
-    }
+    eval_ctx = ctx.build_eval_context()
 
     # Interpolate URL
     try:
@@ -27,6 +25,18 @@ def execute(step: ApiStep, ctx: RunContext) -> StepResult:
             success=False,
             error_code=ErrorCode.ERR_STEP_FAILED,
             error_message=f"Step '{step.id}' URL interpolation failed: {exc}",
+        )
+
+    # Validate URL scheme
+    parsed_url = urllib.parse.urlparse(url)
+    if parsed_url.scheme not in ("http", "https"):
+        return StepResult(
+            success=False,
+            error_code=ErrorCode.ERR_STEP_FAILED,
+            error_message=(
+                f"Step '{step.id}' URL has unsupported scheme '{parsed_url.scheme}'. "
+                f"Only http and https are allowed."
+            ),
         )
 
     # Build request body

@@ -9,7 +9,11 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 
-from checkpointflow.engine.evaluator import EvaluatorError, evaluate_condition
+from checkpointflow.engine.evaluator import (
+    EvaluatorError,
+    evaluate_condition,
+    strip_expression_wrapper,
+)
 from checkpointflow.engine.steps import (
     api_step,
     await_event_step,
@@ -34,20 +38,10 @@ from checkpointflow.models.workflow import (
     Workflow,
     WorkflowDocument,
     WorkflowRefStep,
+    find_duplicate_step_ids,
 )
 from checkpointflow.persistence.store import PersistenceError, Store
 from checkpointflow.schema import validate_workflow_document
-
-Step = (
-    CliStep
-    | ApiStep
-    | AwaitEventStep
-    | WorkflowRefStep
-    | SwitchStep
-    | ForeachStep
-    | ParallelStep
-    | EndStep
-)
 
 
 class RunError(Exception):
@@ -58,6 +52,10 @@ def _parse_input(raw: str) -> dict[str, Any]:
     """Parse input from inline JSON or @file reference."""
     if raw.startswith("@"):
         file_path = Path(raw[1:])
+        # Block path traversal sequences
+        if ".." in file_path.parts:
+            msg = f"Path traversal not allowed in input file path: {file_path}"
+            raise ValueError(msg)
         if not file_path.exists():
             msg = f"Input file not found: {file_path}"
             raise FileNotFoundError(msg)
@@ -95,13 +93,6 @@ def _build_wait_detail(
         risk_level=step.risk_level,
         resume=WaitResume(command=resume_cmd),
     )
-
-
-def _strip_expression_wrapper(expr: str) -> str:
-    """Strip ${...} wrapper from an expression string."""
-    if expr.startswith("${") and expr.endswith("}"):
-        return expr[2:-1]
-    return expr
 
 
 def _build_eval_context(
@@ -147,7 +138,7 @@ def _execute_steps(
 
         # Check if condition
         if step.step_if:
-            condition = _strip_expression_wrapper(step.step_if)
+            condition = strip_expression_wrapper(step.step_if)
             eval_ctx = _build_eval_context(inputs, step_outputs)
             try:
                 if not evaluate_condition(condition, eval_ctx):
@@ -365,12 +356,7 @@ def _run_workflow_inner(
     workflow = doc.workflow
 
     # --- Check for duplicate step IDs ---
-    seen_ids: set[str] = set()
-    duplicate_ids: list[str] = []
-    for step in workflow.steps:
-        if step.id in seen_ids:
-            duplicate_ids.append(step.id)
-        seen_ids.add(step.id)
+    duplicate_ids = find_duplicate_step_ids([s.id for s in workflow.steps])
     if duplicate_ids:
         return Envelope.failure(
             command="run",
@@ -389,11 +375,11 @@ def _run_workflow_inner(
             message=str(exc),
             exit_code=ExitCode.VALIDATION_ERROR,
         )
-    except (json.JSONDecodeError, TypeError) as exc:
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
         return Envelope.failure(
             command="run",
             error_code=ErrorCode.ERR_VALIDATION_INPUT,
-            message=f"Invalid input JSON: {exc}",
+            message=f"Invalid input: {exc}",
             exit_code=ExitCode.VALIDATION_ERROR,
         )
 
@@ -510,11 +496,11 @@ def _resume_workflow_inner(
             exit_code=ExitCode.VALIDATION_ERROR,
             run_id=run_id,
         )
-    except (json.JSONDecodeError, TypeError) as exc:
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
         return Envelope.failure(
             command="resume",
             error_code=ErrorCode.ERR_VALIDATION_EVENT_INPUT,
-            message=f"Invalid event JSON: {exc}",
+            message=f"Invalid event input: {exc}",
             exit_code=ExitCode.VALIDATION_ERROR,
             run_id=run_id,
         )
@@ -584,7 +570,7 @@ def _resume_workflow_inner(
     if isinstance(await_step, AwaitEventStep) and await_step.transitions:
         eval_ctx = _build_eval_context(inputs, step_outputs, event=event_data)
         for transition in await_step.transitions:
-            condition = _strip_expression_wrapper(transition.when)
+            condition = strip_expression_wrapper(transition.when)
             try:
                 if evaluate_condition(condition, eval_ctx):
                     next_step_id = transition.next

@@ -14,12 +14,7 @@ from checkpointflow.persistence.store import Store
 
 def list_runs(store: Store) -> list[dict[str, Any]]:
     """List all runs from the store."""
-    cursor = store._conn.execute(
-        "SELECT run_id, workflow_id, workflow_version, workflow_path, "
-        "status, current_step_id, created_at, updated_at "
-        "FROM runs ORDER BY created_at DESC"
-    )
-    return [dict(row) for row in cursor.fetchall()]
+    return store.list_runs()
 
 
 def get_run_detail(store: Store, run_id: str) -> dict[str, Any] | None:

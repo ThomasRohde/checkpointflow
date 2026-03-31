@@ -266,3 +266,24 @@ def test_run_envelope_omits_workflow_name_when_not_set(tmp_path: Path) -> None:
     env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
     assert env.workflow_name is None
     assert env.workflow_description is None
+
+
+# --- _parse_input path traversal ---
+
+
+def test_parse_input_rejects_traversal() -> None:
+    import pytest
+
+    from checkpointflow.engine.runner import _parse_input
+
+    with pytest.raises(ValueError, match="traversal"):
+        _parse_input("@../../etc/passwd")
+
+
+def test_parse_input_allows_absolute_path(tmp_path: Path) -> None:
+    from checkpointflow.engine.runner import _parse_input
+
+    f = tmp_path / "data.json"
+    f.write_text('{"key": "val"}')
+    result = _parse_input(f"@{f}")
+    assert result == {"key": "val"}

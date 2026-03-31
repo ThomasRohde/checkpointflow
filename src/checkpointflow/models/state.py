@@ -13,6 +13,13 @@ class RunContext:
     run_dir: Path
     defaults: dict[str, Any] = field(default_factory=dict)
 
+    def build_eval_context(self) -> dict[str, Any]:
+        """Build the evaluation context dict for expression interpolation."""
+        return {
+            "inputs": self.inputs,
+            "steps": {sid: {"outputs": outs} for sid, outs in self.step_outputs.items()},
+        }
+
 
 @dataclass
 class StepResult:

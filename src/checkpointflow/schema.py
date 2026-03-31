@@ -16,14 +16,6 @@ def load_workflow_schema() -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(schema_file.read_text(encoding="utf-8")))
 
 
-@functools.cache
-def load_envelope_schema() -> dict[str, Any]:
-    schema_file = importlib.resources.files("checkpointflow.schemas").joinpath(
-        "checkpointflow-run-envelope.schema.json"
-    )
-    return cast(dict[str, Any], json.loads(schema_file.read_text(encoding="utf-8")))
-
-
 def validate_workflow_document(data: dict[str, Any]) -> list[str]:
     schema = load_workflow_schema()
     validator = Draft202012Validator(schema)

@@ -18,6 +18,26 @@ def test_run_context_fields(tmp_path: Path) -> None:
     assert ctx.run_dir == tmp_path
 
 
+def test_run_context_build_eval_context(tmp_path: Path) -> None:
+    ctx = RunContext(
+        run_id="r1",
+        inputs={"name": "Alice"},
+        step_outputs={"s1": {"key": "val"}},
+        run_dir=tmp_path,
+    )
+    eval_ctx = ctx.build_eval_context()
+    assert eval_ctx == {
+        "inputs": {"name": "Alice"},
+        "steps": {"s1": {"outputs": {"key": "val"}}},
+    }
+
+
+def test_run_context_build_eval_context_empty(tmp_path: Path) -> None:
+    ctx = RunContext(run_id="r1", inputs={}, step_outputs={}, run_dir=tmp_path)
+    eval_ctx = ctx.build_eval_context()
+    assert eval_ctx == {"inputs": {}, "steps": {}}
+
+
 def test_step_result_success_defaults() -> None:
     result = StepResult(success=True)
     assert result.success is True

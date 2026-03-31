@@ -12,6 +12,19 @@ from checkpointflow.models.errors import ErrorCode
 from checkpointflow.models.state import RunContext, StepResult
 from checkpointflow.models.workflow import CliStep
 
+_ALLOWED_SHELLS = frozenset(
+    {
+        "bash",
+        "sh",
+        "powershell",
+        "pwsh",
+        "powershell.exe",
+        "pwsh.exe",
+        "cmd",
+        "cmd.exe",
+    }
+)
+
 
 def _build_subprocess_args(command: str, shell: str | None) -> dict[str, Any]:
     """Build subprocess.run kwargs for the given shell."""
@@ -29,19 +42,13 @@ def _build_subprocess_args(command: str, shell: str | None) -> dict[str, Any]:
             return {"args": [found, "-c", command], "shell": False}
         # Not found — fall through to default shell
         return {"args": command, "shell": True}
-    if shell and shell.lower() not in ("cmd", "cmd.exe"):
-        # Custom shell: pass as executable
-        return {"args": command, "shell": True, "executable": shell}
-    # Default: system shell
+    # Default: system shell (cmd on Windows, sh on Unix)
     return {"args": command, "shell": True}
 
 
 def execute(step: CliStep, ctx: RunContext) -> StepResult:
     # Build evaluator context
-    eval_ctx: dict[str, Any] = {
-        "inputs": ctx.inputs,
-        "steps": {sid: {"outputs": outs} for sid, outs in ctx.step_outputs.items()},
-    }
+    eval_ctx = ctx.build_eval_context()
 
     # Normalize list commands to && chain
     raw_command = " && ".join(step.command) if isinstance(step.command, list) else step.command
@@ -77,6 +84,15 @@ def execute(step: CliStep, ctx: RunContext) -> StepResult:
 
     # Determine shell: step-level overrides workflow defaults
     shell = step.shell or ctx.defaults.get("shell")
+    if shell and shell.lower() not in _ALLOWED_SHELLS:
+        return StepResult(
+            success=False,
+            error_code=ErrorCode.ERR_STEP_FAILED,
+            error_message=(
+                f"Step '{step.id}' specifies unsupported shell '{shell}'. "
+                f"Allowed: {', '.join(sorted(_ALLOWED_SHELLS))}"
+            ),
+        )
 
     # Determine timeout
     timeout = step.timeout_seconds if step.timeout_seconds and step.timeout_seconds > 0 else None

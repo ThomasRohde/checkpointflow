@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 from checkpointflow import __version__
 from checkpointflow.models.envelope import Envelope
 from checkpointflow.models.errors import ErrorCode, ExitCode
+from checkpointflow.models.workflow import find_duplicate_step_ids
 from checkpointflow.schema import validate_workflow_document
 
 app = typer.Typer(
@@ -108,12 +109,7 @@ def validate(
         # Check for duplicate step IDs
         workflow = doc["workflow"]
         step_ids = [s["id"] for s in workflow.get("steps", [])]
-        seen: set[str] = set()
-        duplicates = []
-        for sid in step_ids:
-            if sid in seen:
-                duplicates.append(sid)
-            seen.add(sid)
+        duplicates = find_duplicate_step_ids(step_ids)
         if duplicates:
             _emit(
                 Envelope.failure(

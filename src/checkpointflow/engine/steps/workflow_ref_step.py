@@ -1,34 +1,15 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from checkpointflow.engine.evaluator import EvaluatorError, resolve_path
+from checkpointflow.engine.evaluator import EvaluatorError, interpolate_values
 from checkpointflow.engine.steps import cli_step, end_step
 from checkpointflow.models.errors import ErrorCode
 from checkpointflow.models.state import RunContext, StepResult
 from checkpointflow.models.workflow import CliStep, EndStep, WorkflowDocument, WorkflowRefStep
-
-_FULL_EXPR = re.compile(r"^\$\{([^}]+)\}$")
-
-
-def _interpolate_input_values(value: Any, eval_ctx: dict[str, Any]) -> Any:
-    """Recursively interpolate ${...} expressions in input values."""
-    if isinstance(value, str) and "${" in value:
-        m = _FULL_EXPR.match(value.strip())
-        if m:
-            return resolve_path(m.group(1).strip(), eval_ctx)
-        from checkpointflow.engine.evaluator import interpolate
-
-        return interpolate(value, eval_ctx)
-    if isinstance(value, dict):
-        return {k: _interpolate_input_values(v, eval_ctx) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_interpolate_input_values(v, eval_ctx) for v in value]
-    return value
 
 
 def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
@@ -57,14 +38,11 @@ def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
     sub_workflow = doc.workflow
 
     # Build sub-workflow inputs from the step's inputs field
-    eval_ctx: dict[str, Any] = {
-        "inputs": ctx.inputs,
-        "steps": {sid: {"outputs": outs} for sid, outs in ctx.step_outputs.items()},
-    }
+    eval_ctx = ctx.build_eval_context()
     sub_inputs: dict[str, Any] = {}
     if step.inputs:
         try:
-            sub_inputs = _interpolate_input_values(step.inputs, eval_ctx)
+            sub_inputs = interpolate_values(step.inputs, eval_ctx)
         except EvaluatorError as exc:
             return StepResult(
                 success=False,

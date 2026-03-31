@@ -12,6 +12,7 @@ from checkpointflow.models.workflow import (
     CliStep,
     EndStep,
     WorkflowDocument,
+    find_duplicate_step_ids,
 )
 
 
@@ -106,3 +107,18 @@ def test_workflow_document_rejects_missing_steps() -> None:
     }
     with pytest.raises(ValidationError):
         WorkflowDocument.model_validate(data)
+
+
+# --- find_duplicate_step_ids ---
+
+
+def test_find_duplicate_step_ids_none() -> None:
+    assert find_duplicate_step_ids(["a", "b", "c"]) == []
+
+
+def test_find_duplicate_step_ids_found() -> None:
+    assert find_duplicate_step_ids(["a", "b", "a", "c", "b"]) == ["a", "b"]
+
+
+def test_find_duplicate_step_ids_empty() -> None:
+    assert find_duplicate_step_ids([]) == []

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from checkpointflow.engine.evaluator import EvaluatorError, evaluate_condition
 from checkpointflow.models.errors import ErrorCode
 from checkpointflow.models.state import RunContext, StepResult
@@ -10,10 +8,7 @@ from checkpointflow.models.workflow import SwitchStep
 
 def execute(step: SwitchStep, ctx: RunContext) -> StepResult:
     """Evaluate switch cases and return the target step ID in outputs."""
-    eval_ctx: dict[str, Any] = {
-        "inputs": ctx.inputs,
-        "steps": {sid: {"outputs": outs} for sid, outs in ctx.step_outputs.items()},
-    }
+    eval_ctx = ctx.build_eval_context()
 
     for case in step.cases:
         try:

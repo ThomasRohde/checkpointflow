@@ -6,7 +6,6 @@ from typing import Any
 import yaml
 
 from checkpointflow.schema import (
-    load_envelope_schema,
     load_workflow_schema,
     validate_workflow_document,
 )
@@ -14,12 +13,6 @@ from checkpointflow.schema import (
 
 def test_load_workflow_schema_returns_dict() -> None:
     schema = load_workflow_schema()
-    assert isinstance(schema, dict)
-    assert "$schema" in schema
-
-
-def test_load_envelope_schema_returns_dict() -> None:
-    schema = load_envelope_schema()
     assert isinstance(schema, dict)
     assert "$schema" in schema
 

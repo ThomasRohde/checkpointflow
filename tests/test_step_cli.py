@@ -210,3 +210,24 @@ def test_cli_step_command_list_with_interpolation(tmp_path: Path) -> None:
     stdout = (tmp_path / "stdout" / "interp.txt").read_text()
     assert "test" in stdout
     assert "done" in stdout
+
+
+# --- Shell allow-list ---
+
+
+def test_cli_step_rejects_unknown_shell(tmp_path: Path) -> None:
+    step = CliStep.model_validate(
+        {"id": "s1", "kind": "cli", "command": "echo hi", "shell": "/usr/local/evil"}
+    )
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is False
+    assert "unsupported shell" in (result.error_message or "").lower()
+
+
+def test_cli_step_rejects_arbitrary_executable(tmp_path: Path) -> None:
+    step = CliStep.model_validate(
+        {"id": "s1", "kind": "cli", "command": "echo hi", "shell": "python3"}
+    )
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is False
+    assert "unsupported shell" in (result.error_message or "").lower()

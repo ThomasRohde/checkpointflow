@@ -25,12 +25,60 @@ def test_store_creates_db_file(tmp_path: Path) -> None:
 def test_store_creates_tables(store: Store) -> None:
     cursor = store._conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
     tables = {row[0] for row in cursor.fetchall()}
-    assert {"runs", "events", "step_results", "artifacts"} <= tables
+    assert {"runs", "events", "step_results"} <= tables
 
 
 def test_store_idempotent_init(tmp_path: Path) -> None:
     Store(base_dir=tmp_path)
     Store(base_dir=tmp_path)  # should not raise
+
+
+# --- list_runs ---
+
+
+def _make_run(store: Store) -> str:
+    return store.create_run(
+        workflow_id="wf1",
+        workflow_version="1.0",
+        workflow_hash="abc",
+        workflow_path="/tmp/wf.yaml",
+        inputs_json="{}",
+    )
+
+
+def test_list_runs_empty(store: Store) -> None:
+    assert store.list_runs() == []
+
+
+def test_list_runs_returns_all(store: Store) -> None:
+    _make_run(store)
+    _make_run(store)
+    assert len(store.list_runs()) == 2
+
+
+def test_list_runs_ordered_desc(store: Store) -> None:
+    r1 = _make_run(store)
+    time.sleep(0.02)
+    r2 = _make_run(store)
+    runs = store.list_runs()
+    assert runs[0]["run_id"] == r2
+    assert runs[1]["run_id"] == r1
+
+
+def test_list_runs_contains_expected_fields(store: Store) -> None:
+    _make_run(store)
+    run = store.list_runs()[0]
+    for field in (
+        "run_id",
+        "workflow_id",
+        "workflow_version",
+        "workflow_path",
+        "status",
+        "current_step_id",
+        "created_at",
+        "updated_at",
+    ):
+        assert field in run
 
 
 # --- Run CRUD ---

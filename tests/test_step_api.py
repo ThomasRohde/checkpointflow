@@ -178,3 +178,33 @@ def test_api_connection_error(tmp_path: Path) -> None:
     result = execute(step, _ctx(tmp_path))
     assert result.success is False
     assert result.error_message is not None
+
+
+# --- URL scheme validation ---
+
+
+def test_api_rejects_file_scheme(tmp_path: Path) -> None:
+    step = ApiStep.model_validate(
+        {"id": "bad", "kind": "api", "method": "GET", "url": "file:///etc/passwd"}
+    )
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is False
+    assert "scheme" in (result.error_message or "").lower()
+
+
+def test_api_rejects_gopher_scheme(tmp_path: Path) -> None:
+    step = ApiStep.model_validate(
+        {"id": "bad", "kind": "api", "method": "GET", "url": "gopher://evil.com"}
+    )
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is False
+    assert "scheme" in (result.error_message or "").lower()
+
+
+def test_api_rejects_data_scheme(tmp_path: Path) -> None:
+    step = ApiStep.model_validate(
+        {"id": "bad", "kind": "api", "method": "GET", "url": "data:text/html,hello"}
+    )
+    result = execute(step, _ctx(tmp_path))
+    assert result.success is False
+    assert "scheme" in (result.error_message or "").lower()

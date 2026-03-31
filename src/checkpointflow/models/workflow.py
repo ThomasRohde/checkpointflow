@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -121,6 +122,17 @@ Step = Annotated[
     | EndStep,
     Field(discriminator="kind"),
 ]
+
+
+def find_duplicate_step_ids(step_ids: Sequence[str]) -> list[str]:
+    """Return step IDs that appear more than once, in order of first duplicate."""
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for sid in step_ids:
+        if sid in seen and sid not in duplicates:
+            duplicates.append(sid)
+        seen.add(sid)
+    return duplicates
 
 
 class Workflow(BaseModel):

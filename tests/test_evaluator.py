@@ -8,7 +8,9 @@ from checkpointflow.engine.evaluator import (
     EvaluatorError,
     evaluate_condition,
     interpolate,
+    interpolate_values,
     resolve_path,
+    strip_expression_wrapper,
 )
 
 
@@ -130,3 +132,52 @@ def test_evaluate_condition_and_false(ctx: dict[str, Any]) -> None:
 
 def test_evaluate_condition_or(ctx: dict[str, Any]) -> None:
     assert evaluate_condition('inputs.page_id == "999" or inputs.page_id == "123"', ctx) is True
+
+
+# --- strip_expression_wrapper ---
+
+
+def test_strip_expression_wrapper_strips() -> None:
+    assert strip_expression_wrapper("${inputs.x}") == "inputs.x"
+
+
+def test_strip_expression_wrapper_leaves_plain() -> None:
+    assert strip_expression_wrapper("plain") == "plain"
+
+
+def test_strip_expression_wrapper_partial() -> None:
+    assert strip_expression_wrapper("${incomplete") == "${incomplete"
+
+
+# --- interpolate_values ---
+
+
+def test_interpolate_values_pure_reference(ctx: dict[str, Any]) -> None:
+    assert interpolate_values("${inputs.page_id}", ctx) == "123"
+
+
+def test_interpolate_values_mixed_string(ctx: dict[str, Any]) -> None:
+    assert interpolate_values("id-${inputs.page_id}-end", ctx) == "id-123-end"
+
+
+def test_interpolate_values_nested_dict(ctx: dict[str, Any]) -> None:
+    result = interpolate_values({"key": "${inputs.page_id}"}, ctx)
+    assert result == {"key": "123"}
+
+
+def test_interpolate_values_list(ctx: dict[str, Any]) -> None:
+    result = interpolate_values(["${inputs.page_id}", "static"], ctx)
+    assert result == ["123", "static"]
+
+
+def test_interpolate_values_non_string_passthrough() -> None:
+    assert interpolate_values(42, {}) == 42
+    assert interpolate_values(True, {}) is True
+    assert interpolate_values(None, {}) is None
+
+
+def test_interpolate_values_preserves_type_for_full_expr() -> None:
+    ctx: dict[str, Any] = {"inputs": {"count": 42}}
+    result = interpolate_values("${inputs.count}", ctx)
+    assert result == 42
+    assert isinstance(result, int)

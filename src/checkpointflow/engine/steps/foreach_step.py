@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from checkpointflow.engine.evaluator import EvaluatorError, resolve_path
+from checkpointflow.engine.evaluator import EvaluatorError, resolve_path, strip_expression_wrapper
 from checkpointflow.engine.steps import cli_step, end_step
 from checkpointflow.models.errors import ErrorCode
 from checkpointflow.models.state import RunContext, StepResult
@@ -22,15 +22,10 @@ def _parse_body_step(step_dict: dict[str, Any]) -> CliStep | EndStep:
 
 def execute(step: ForeachStep, ctx: RunContext) -> StepResult:
     """Iterate over items and execute body steps for each."""
-    eval_ctx: dict[str, Any] = {
-        "inputs": ctx.inputs,
-        "steps": {sid: {"outputs": outs} for sid, outs in ctx.step_outputs.items()},
-    }
+    eval_ctx = ctx.build_eval_context()
 
     # Resolve items expression
-    items_expr = step.items.strip()
-    if items_expr.startswith("${") and items_expr.endswith("}"):
-        items_expr = items_expr[2:-1].strip()
+    items_expr = strip_expression_wrapper(step.items.strip())
 
     try:
         items = resolve_path(items_expr, eval_ctx)
@@ -125,18 +120,9 @@ def execute(step: ForeachStep, ctx: RunContext) -> StepResult:
                 from checkpointflow.engine.evaluator import interpolate
 
                 # Build a mini-context for item interpolation
-                item_ctx: dict[str, Any] = {
-                    "item": item,
-                    "item_index": i,
-                    "inputs": original_inputs,
-                    "steps": {
-                        sid: {"outputs": outs}
-                        for sid, outs in {
-                            **ctx.step_outputs,
-                            **iteration_outputs,
-                        }.items()
-                    },
-                }
+                item_ctx = iter_ctx.build_eval_context()
+                item_ctx["item"] = item
+                item_ctx["item_index"] = i
 
                 raw_cmd = (
                     " && ".join(body_step.command)

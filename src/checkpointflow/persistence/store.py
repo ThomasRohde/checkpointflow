@@ -55,21 +55,10 @@ CREATE TABLE IF NOT EXISTS step_results (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS artifacts (
-    artifact_id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES runs(run_id),
-    artifact_path TEXT NOT NULL,
-    artifact_type TEXT NOT NULL,
-    source_step_id TEXT,
-    size_bytes INTEGER,
-    created_at TEXT NOT NULL
-);
-
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_step_results_run_id ON step_results(run_id, execution_order);
-CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON artifacts(run_id, source_step_id);
 """
 
 
@@ -80,7 +69,7 @@ class Store:
         self.base_dir = base_dir or Path.home() / ".checkpointflow"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         db_path = self.base_dir / "runs.db"
-        self._conn = sqlite3.connect(str(db_path))
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -143,6 +132,15 @@ class Store:
         if row is None:
             return None
         return dict(row)
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        """List all runs, ordered by creation time descending."""
+        cursor = self._conn.execute(
+            "SELECT run_id, workflow_id, workflow_version, workflow_path, "
+            "status, current_step_id, created_at, updated_at "
+            "FROM runs ORDER BY created_at DESC"
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
     def update_run(self, run_id: str, **kwargs: Any) -> None:
         if not kwargs:
@@ -244,7 +242,6 @@ class Store:
             raise PersistenceError(msg)
 
         # Delete child rows first, then the run
-        self._conn.execute("DELETE FROM artifacts WHERE run_id = ?", (run_id,))
         self._conn.execute("DELETE FROM step_results WHERE run_id = ?", (run_id,))
         self._conn.execute("DELETE FROM events WHERE run_id = ?", (run_id,))
         self._conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))

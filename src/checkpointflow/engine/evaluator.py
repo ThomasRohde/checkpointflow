@@ -8,6 +8,16 @@ class EvaluatorError(Exception):
     pass
 
 
+_FULL_EXPR = re.compile(r"^\$\{([^}]+)\}$")
+
+
+def strip_expression_wrapper(expr: str) -> str:
+    """Strip ${...} wrapper from an expression string."""
+    if expr.startswith("${") and expr.endswith("}"):
+        return expr[2:-1]
+    return expr
+
+
 def resolve_path(expression: str, context: dict[str, Any]) -> Any:
     """Resolve a dotted path like 'inputs.page_id' against the context dict."""
     parts = expression.strip().split(".")
@@ -93,3 +103,17 @@ def evaluate_condition(condition: str, context: dict[str, Any]) -> bool:
         return all(evaluate_condition(part, context) for part in and_parts)
 
     return _evaluate_comparison(condition, context)
+
+
+def interpolate_values(value: Any, context: dict[str, Any]) -> Any:
+    """Recursively interpolate ${...} expressions, preserving types for pure references."""
+    if isinstance(value, str) and "${" in value:
+        m = _FULL_EXPR.match(value.strip())
+        if m:
+            return resolve_path(m.group(1).strip(), context)
+        return interpolate(value, context)
+    if isinstance(value, dict):
+        return {k: interpolate_values(v, context) for k, v in value.items()}
+    if isinstance(value, list):
+        return [interpolate_values(v, context) for v in value]
+    return value
