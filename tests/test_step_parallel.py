@@ -127,6 +127,49 @@ def test_parallel_with_await_event_branch_returns_error(
     assert "not supported" in result.error_message
 
 
+def test_parallel_all_branches_fail(run_ctx: Callable[..., RunContext]) -> None:
+    step = ParallelStep.model_validate(
+        {
+            "id": "par",
+            "kind": "parallel",
+            "branches": [
+                {"start_at": "fail_a"},
+                {"start_at": "fail_b"},
+            ],
+        }
+    )
+    workflow_steps = [
+        _make_cli_step("fail_a", "exit 1", shell="bash"),
+        _make_cli_step("fail_b", "exit 1", shell="bash"),
+    ]
+    result = execute(step, run_ctx(), workflow_steps=workflow_steps)
+    assert result.success is False
+    assert result.error_message is not None
+
+
+def test_parallel_three_branches(run_ctx: Callable[..., RunContext]) -> None:
+    step = ParallelStep.model_validate(
+        {
+            "id": "par",
+            "kind": "parallel",
+            "branches": [
+                {"start_at": "a"},
+                {"start_at": "b"},
+                {"start_at": "c"},
+            ],
+        }
+    )
+    workflow_steps = [
+        _make_cli_step("a", 'echo \'{"from": "a"}\'', shell="bash"),
+        _make_cli_step("b", 'echo \'{"from": "b"}\'', shell="bash"),
+        _make_cli_step("c", 'echo \'{"from": "c"}\'', shell="bash"),
+    ]
+    result = execute(step, run_ctx(), workflow_steps=workflow_steps)
+    assert result.success is True
+    assert result.outputs is not None
+    assert len(result.outputs) == 3
+
+
 def test_parallel_with_api_step_branch(run_ctx: Callable[..., RunContext]) -> None:
     step = ParallelStep.model_validate(
         {

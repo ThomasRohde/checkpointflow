@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import platform
 from collections.abc import Callable
 from pathlib import Path
-
-import pytest
 
 from checkpointflow.engine.steps.foreach_step import execute
 from checkpointflow.models.state import RunContext
@@ -217,9 +214,10 @@ def test_foreach_body_with_api_step(run_ctx: Callable[..., RunContext]) -> None:
     assert result.error_message is not None
 
 
-@pytest.mark.skipif(platform.system() != "Windows", reason="echo syntax is platform-specific")
 def test_foreach_body_with_nested_foreach(run_ctx: Callable[..., RunContext]) -> None:
     """A foreach body can contain another foreach step."""
+    import sys
+
     step = ForeachStep.model_validate(
         {
             "id": "outer",
@@ -234,7 +232,7 @@ def test_foreach_body_with_nested_foreach(run_ctx: Callable[..., RunContext]) ->
                         {
                             "id": "echo",
                             "kind": "cli",
-                            "command": "echo ${item}",
+                            "command": f"{sys.executable} -c \"print('${{item}}')\"",
                         },
                     ],
                 },

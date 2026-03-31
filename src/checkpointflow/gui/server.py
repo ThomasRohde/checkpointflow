@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import secrets
 import webbrowser
-from collections.abc import MutableMapping
+from collections.abc import AsyncGenerator, MutableMapping
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -55,14 +57,93 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+class CORSMiddleware:
+    """Restrict cross-origin requests to localhost origins only."""
+
+    _ALLOWED_ORIGIN_PREFIX = b"http://localhost"
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        origin = headers.get(b"origin", b"")
+
+        if not origin.startswith(self._ALLOWED_ORIGIN_PREFIX):
+            # No CORS headers for non-localhost origins
+            await self.app(scope, receive, send)
+            return
+
+        method: str = scope.get("method", "")
+        if method == "OPTIONS":
+            # Preflight response
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 204,
+                    "headers": [
+                        (b"access-control-allow-origin", origin),
+                        (b"access-control-allow-methods", b"GET, POST, DELETE, OPTIONS"),
+                        (b"access-control-allow-headers", b"authorization, content-type"),
+                        (b"access-control-max-age", b"3600"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        async def send_with_cors(message: MutableMapping[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                msg_headers = list(message.get("headers", []))
+                msg_headers.append((b"access-control-allow-origin", origin))
+                message["headers"] = msg_headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
+
+
+class TokenAuthMiddleware:
+    """Require a bearer token or query-param token on /api/ routes."""
+
+    def __init__(self, app: ASGIApp, token: str) -> None:
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] == "http"
+            and scope.get("path", "").startswith("/api/")
+            and not self._check_token(scope)
+        ):
+            response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    def _check_token(self, scope: Scope) -> bool:
+        # Check Authorization header
+        headers = dict(scope.get("headers", []))
+        auth = headers.get(b"authorization", b"").decode()
+        if auth == f"Bearer {self.token}":
+            return True
+        # Check query param
+        qs: str = scope.get("query_string", b"").decode()
+        return any(part.startswith("token=") and part[6:] == self.token for part in qs.split("&"))
+
+
 def _json(data: Any, status: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status)
 
 
-def create_app(base_dir: Path | None = None) -> Starlette:
-    """Create the Starlette ASGI app."""
+def create_app(base_dir: Path | None = None) -> tuple[Starlette, str]:
+    """Create the Starlette ASGI app. Returns (app, auth_token)."""
     resolved_base = base_dir or Path.home() / ".checkpointflow"
     store = Store(base_dir=resolved_base)
+    token = secrets.token_urlsafe(32)
 
     async def api_runs(request: Request) -> Response:
         return _json(list_runs(store))
@@ -145,7 +226,14 @@ def create_app(base_dir: Path | None = None) -> Starlette:
     # SPA fallback for all other routes
     routes.append(Route("/{path:path}", spa_fallback))
 
-    return SecurityHeadersMiddleware(Starlette(routes=routes))  # type: ignore[return-value]
+    @asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncGenerator[None]:
+        yield
+        store.close()
+
+    inner = Starlette(routes=routes, lifespan=lifespan)
+    app = SecurityHeadersMiddleware(CORSMiddleware(TokenAuthMiddleware(inner, token)))
+    return app, token  # type: ignore[return-value]
 
 
 def run_server(port: int = 8420, base_dir: Path | None = None) -> None:
@@ -159,8 +247,8 @@ def run_server(port: int = 8420, base_dir: Path | None = None) -> None:
     if sys.platform == "win32":
         signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    app = create_app(base_dir=base_dir)
-    url = f"http://localhost:{port}"
+    app, token = create_app(base_dir=base_dir)
+    url = f"http://localhost:{port}?token={token}"
     print(f"checkpointflow dashboard: {url}")
     webbrowser.open(url)
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

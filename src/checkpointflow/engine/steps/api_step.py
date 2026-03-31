@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -10,6 +12,19 @@ from checkpointflow.engine.evaluator import EvaluatorError, interpolate
 from checkpointflow.models.errors import ErrorCode
 from checkpointflow.models.state import RunContext, StepResult
 from checkpointflow.models.workflow import ApiStep
+
+
+def _is_blocked_host(hostname: str) -> bool:
+    """Return True if the hostname resolves to a link-local IP (SSRF protection)."""
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        # Not a literal IP — resolve hostname
+        try:
+            addr = ipaddress.ip_address(socket.gethostbyname(hostname))
+        except (socket.gaierror, ValueError):
+            return False
+    return addr.is_link_local
 
 
 def execute(step: ApiStep, ctx: RunContext) -> StepResult:
@@ -35,6 +50,19 @@ def execute(step: ApiStep, ctx: RunContext) -> StepResult:
             error_message=(
                 f"Step '{step.id}' URL has unsupported scheme '{parsed_url.scheme}'. "
                 f"Only http and https are allowed."
+            ),
+        )
+
+    # Block requests to link-local and cloud metadata endpoints (SSRF protection)
+    hostname = parsed_url.hostname or ""
+    blocked = _is_blocked_host(hostname)
+    if blocked:
+        return StepResult(
+            success=False,
+            error_code=ErrorCode.ERR_STEP_FAILED,
+            error_message=(
+                f"Step '{step.id}' URL targets a blocked address ({hostname}). "
+                f"Requests to link-local and cloud metadata endpoints are not allowed."
             ),
         )
 

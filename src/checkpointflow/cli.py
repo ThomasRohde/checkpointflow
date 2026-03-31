@@ -311,7 +311,7 @@ def cancel(
     ],
 ) -> None:
     """Cancel a waiting or running run."""
-    from checkpointflow.engine.runner import cancel_run
+    from checkpointflow.engine.lifecycle import cancel_run
 
     envelope = cancel_run(run_id, reason, base_dir=_get_base_dir())
     _emit(envelope)
@@ -325,7 +325,7 @@ def delete(
     ],
 ) -> None:
     """Permanently delete a completed, failed, or cancelled run."""
-    from checkpointflow.engine.runner import delete_run
+    from checkpointflow.engine.lifecycle import delete_run
 
     envelope = delete_run(run_id, base_dir=_get_base_dir())
     _emit(envelope)

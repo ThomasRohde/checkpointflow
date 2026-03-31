@@ -10,10 +10,11 @@ from typing import Any
 import yaml
 
 from checkpointflow.models.workflow import WorkflowDocument
-from checkpointflow.persistence.store import Store
+from checkpointflow.persistence.serializers import serialize_event, serialize_step_result
+from checkpointflow.persistence.store import RunSummary, Store
 
 
-def list_runs(store: Store) -> list[dict[str, Any]]:
+def list_runs(store: Store) -> list[RunSummary]:
     """List all runs from the store."""
     return store.list_runs()
 
@@ -33,28 +34,10 @@ def get_run_detail(store: Store, run_id: str) -> dict[str, Any] | None:
         "step_outputs": json.loads(run["step_outputs_json"]),
         "result": json.loads(run["result_json"]) if run["result_json"] else None,
         "step_results": [
-            {
-                "step_id": sr["step_id"],
-                "step_kind": sr["step_kind"],
-                "exit_code": sr["exit_code"],
-                "error_code": sr["error_code"],
-                "error_message": sr["error_message"],
-                "outputs": json.loads(sr["outputs_json"]) if sr["outputs_json"] else None,
-                "stdout_path": sr["stdout_path"],
-                "stderr_path": sr["stderr_path"],
-                "execution_order": sr["execution_order"],
-                "created_at": sr["created_at"],
-            }
+            {**serialize_step_result(sr), "execution_order": sr["execution_order"]}
             for sr in step_results
         ],
-        "events": [
-            {
-                "event_name": ev["event_name"],
-                "event_data": json.loads(ev["event_json"]),
-                "created_at": ev["created_at"],
-            }
-            for ev in events
-        ],
+        "events": [serialize_event(ev) for ev in events],
     }
 
 

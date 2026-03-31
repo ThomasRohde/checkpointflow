@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from checkpointflow.engine.queries import query_inspect, query_status
+from checkpointflow.engine.queries import _status_to_exit_code, query_inspect, query_status
 from checkpointflow.engine.runner import resume_workflow, run_workflow
+from checkpointflow.models.errors import ExitCode
 
 
 def _write_cli_end_workflow(tmp_path: Path) -> Path:
@@ -189,3 +190,7 @@ workflow:
     insp = query_inspect(env.run_id, base_dir=tmp_path / "store")
     assert insp.workflow_name == "Named Workflow"
     assert insp.workflow_description == "Has a description"
+
+
+def test_status_to_exit_code_unknown_returns_internal_error() -> None:
+    assert _status_to_exit_code("bogus_status") == ExitCode.INTERNAL_ERROR

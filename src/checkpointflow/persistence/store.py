@@ -5,11 +5,45 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, TypedDict, cast
 
 
 class PersistenceError(Exception):
     pass
+
+
+class RunRecord(TypedDict):
+    """Full row from the runs table."""
+
+    run_id: str
+    workflow_id: str
+    workflow_name: str | None
+    workflow_description: str | None
+    workflow_version: str | None
+    workflow_hash: str
+    workflow_path: str
+    status: str
+    current_step_id: str | None
+    expected_event_name: str | None
+    expected_event_schema: str | None
+    inputs_json: str
+    step_outputs_json: str
+    result_json: str | None
+    created_at: str
+    updated_at: str
+
+
+class RunSummary(TypedDict):
+    """Subset of columns returned by list_runs."""
+
+    run_id: str
+    workflow_id: str
+    workflow_version: str | None
+    workflow_path: str
+    status: str
+    current_step_id: str | None
+    created_at: str
+    updated_at: str
 
 
 _SCHEMA_SQL = """\
@@ -61,6 +95,20 @@ CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_step_results_run_id ON step_results(run_id, execution_order);
 """
+
+
+_UPDATABLE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "status",
+        "current_step_id",
+        "expected_event_name",
+        "expected_event_schema",
+        "inputs_json",
+        "step_outputs_json",
+        "result_json",
+        "updated_at",
+    }
+)
 
 
 class Store:
@@ -127,37 +175,41 @@ class Store:
         self._conn.commit()
         return run_id
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
+    def get_run(self, run_id: str) -> RunRecord | None:
         cursor = self._conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
         row = cursor.fetchone()
         if row is None:
             return None
-        return dict(row)
+        return cast(RunRecord, dict(row))
 
-    def list_runs(self) -> list[dict[str, Any]]:
+    def list_runs(self) -> list[RunSummary]:
         """List all runs, ordered by creation time descending."""
         cursor = self._conn.execute(
             "SELECT run_id, workflow_id, workflow_version, workflow_path, "
             "status, current_step_id, created_at, updated_at "
             "FROM runs ORDER BY created_at DESC"
         )
-        return [dict(row) for row in cursor.fetchall()]
+        return [cast(RunSummary, dict(row)) for row in cursor.fetchall()]
 
     def update_run(self, run_id: str, **kwargs: Any) -> None:
         if not kwargs:
             return
-        # Verify run exists
-        if self.get_run(run_id) is None:
-            msg = f"Run not found: {run_id}"
+        # Validate column names against whitelist
+        invalid = kwargs.keys() - _UPDATABLE_COLUMNS
+        if invalid:
+            msg = f"Invalid column names: {', '.join(sorted(invalid))}"
             raise PersistenceError(msg)
 
         kwargs["updated_at"] = self._now()
         set_clause = ", ".join(f"{k} = ?" for k in kwargs)
         values = [*kwargs.values(), run_id]
-        self._conn.execute(
+        cursor = self._conn.execute(
             f"UPDATE runs SET {set_clause} WHERE run_id = ?",
             values,
         )
+        if cursor.rowcount == 0:
+            msg = f"Run not found: {run_id}"
+            raise PersistenceError(msg)
         self._conn.commit()
 
     def insert_step_result(
@@ -238,8 +290,9 @@ class Store:
             msg = f"Run not found: {run_id}"
             raise PersistenceError(msg)
 
-        if run["status"] in ("created", "running", "waiting"):
-            msg = f"Cannot delete run {run_id} (status: {run['status']})"
+        status = run["status"]
+        if status in ("created", "running", "waiting"):
+            msg = f"Cannot delete run {run_id} (status: {status})"
             raise PersistenceError(msg)
 
         # Delete child rows first, then the run

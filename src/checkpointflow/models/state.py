@@ -13,12 +13,15 @@ class RunContext:
     run_dir: Path
     defaults: dict[str, Any] = field(default_factory=dict)
 
-    def build_eval_context(self) -> dict[str, Any]:
+    def build_eval_context(self, event: dict[str, Any] | None = None) -> dict[str, Any]:
         """Build the evaluation context dict for expression interpolation."""
-        return {
+        ctx: dict[str, Any] = {
             "inputs": self.inputs,
             "steps": {sid: {"outputs": outs} for sid, outs in self.step_outputs.items()},
         }
+        if event is not None:
+            ctx["event"] = event
+        return ctx
 
 
 @dataclass

@@ -1,0 +1,8 @@
+{
+  "pack_root": "C:/Users/thoma/.checkpointflow",
+  "repo_dir": "C:/Users/thoma/Projects/checkpointflow",
+  "diff_path": "C:/Users/thoma/Projects/checkpointflow/.tmp-review-diff.patch",
+  "pr_title": "Refactor engine, persistence, and GUI with improved state management",
+  "artifact_dir": "C:/Users/thoma/Projects/checkpointflow/.review-artifacts",
+  "author": "Thomas Klok Rohde"
+}

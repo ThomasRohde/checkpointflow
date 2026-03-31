@@ -32,6 +32,25 @@ def test_run_context_build_eval_context(tmp_path: Path) -> None:
     }
 
 
+def test_run_context_build_eval_context_with_event(tmp_path: Path) -> None:
+    ctx = RunContext(
+        run_id="r1",
+        inputs={"name": "Alice"},
+        step_outputs={"s1": {"key": "val"}},
+        run_dir=tmp_path,
+    )
+    event = {"decision": "approve"}
+    eval_ctx = ctx.build_eval_context(event=event)
+    assert eval_ctx["event"] == {"decision": "approve"}
+    assert eval_ctx["inputs"] == {"name": "Alice"}
+
+
+def test_run_context_build_eval_context_without_event_has_no_event_key(tmp_path: Path) -> None:
+    ctx = RunContext(run_id="r1", inputs={}, step_outputs={}, run_dir=tmp_path)
+    eval_ctx = ctx.build_eval_context()
+    assert "event" not in eval_ctx
+
+
 def test_run_context_build_eval_context_empty(tmp_path: Path) -> None:
     ctx = RunContext(run_id="r1", inputs={}, step_outputs={}, run_dir=tmp_path)
     eval_ctx = ctx.build_eval_context()

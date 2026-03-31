@@ -214,3 +214,20 @@ def test_api_header_interpolation_failure(run_ctx: Callable[..., RunContext]) ->
     assert result.success is False
     assert "header" in (result.error_message or "").lower()
     assert "Authorization" in (result.error_message or "")
+
+
+# --- SSRF protection ---
+
+
+def test_api_blocks_metadata_endpoint(run_ctx: Callable[..., RunContext]) -> None:
+    step = ApiStep.model_validate(
+        {
+            "id": "ssrf",
+            "kind": "api",
+            "method": "GET",
+            "url": "http://169.254.169.254/latest/meta-data/",
+        }
+    )
+    result = execute(step, run_ctx())
+    assert result.success is False
+    assert "blocked" in (result.error_message or "").lower()

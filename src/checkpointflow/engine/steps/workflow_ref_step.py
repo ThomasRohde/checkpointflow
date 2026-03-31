@@ -105,12 +105,14 @@ def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
 
         # SwitchStep: jump to target
         if isinstance(sub_step, SwitchStep) and result.outputs:
-            next_step_id = result.outputs.get("_next_step_id")
-            if next_step_id:
-                step_ids = [s.id for s in all_sub_steps]
-                if next_step_id in step_ids:
-                    idx = step_ids.index(next_step_id)
-                    continue
+            from checkpointflow.engine.runner import resolve_switch_jump
+
+            sub_step_ids = [s.id for s in all_sub_steps]
+            jump = resolve_switch_jump(result.outputs, all_sub_steps, sub_step_ids)
+            if jump is not None:
+                _, target_idx = jump
+                idx = target_idx
+                continue
 
         idx += 1
 

@@ -9,6 +9,11 @@ import yaml
 from checkpointflow.models.envelope import Envelope, WaitDetail, WaitResume
 from checkpointflow.models.errors import ErrorCode, ExitCode
 from checkpointflow.models.workflow import AwaitEventStep, WorkflowDocument
+from checkpointflow.persistence.serializers import (
+    serialize_event,
+    serialize_step_result,
+    workflow_metadata,
+)
 from checkpointflow.persistence.store import Store
 
 
@@ -18,8 +23,8 @@ def query_status(
     base_dir: Path | None = None,
 ) -> Envelope:
     """Query the current status of a run."""
-    store = Store(base_dir=base_dir)
-    run = store.get_run(run_id)
+    with Store(base_dir=base_dir) as store:
+        run = store.get_run(run_id)
 
     if run is None:
         return Envelope.failure(
@@ -34,10 +39,7 @@ def query_status(
 
     kwargs: dict[str, Any] = {
         "run_id": run_id,
-        "workflow_id": run["workflow_id"],
-        "workflow_name": run.get("workflow_name"),
-        "workflow_description": run.get("workflow_description"),
-        "workflow_version": run["workflow_version"],
+        **workflow_metadata(run),
         "current_step_id": run["current_step_id"],
     }
 
@@ -102,45 +104,24 @@ def query_inspect(
     base_dir: Path | None = None,
 ) -> Envelope:
     """Query detailed execution history of a run."""
-    store = Store(base_dir=base_dir)
-    run = store.get_run(run_id)
+    with Store(base_dir=base_dir) as store:
+        run = store.get_run(run_id)
+        if run is None:
+            return Envelope.failure(
+                command="inspect",
+                error_code=ErrorCode.ERR_RUN_NOT_FOUND,
+                message=f"Run not found: {run_id}",
+                exit_code=ExitCode.VALIDATION_ERROR,
+            )
 
-    if run is None:
-        return Envelope.failure(
-            command="inspect",
-            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
-            message=f"Run not found: {run_id}",
-            exit_code=ExitCode.VALIDATION_ERROR,
-        )
-
-    step_results = store.get_step_results(run_id)
-    events = store.get_events(run_id)
+        step_results = store.get_step_results(run_id)
+        events = store.get_events(run_id)
 
     detail: dict[str, Any] = {
         "inputs": json.loads(run["inputs_json"]),
         "step_outputs": json.loads(run["step_outputs_json"]),
-        "step_results": [
-            {
-                "step_id": sr["step_id"],
-                "step_kind": sr["step_kind"],
-                "exit_code": sr["exit_code"],
-                "error_code": sr["error_code"],
-                "error_message": sr["error_message"],
-                "outputs": json.loads(sr["outputs_json"]) if sr["outputs_json"] else None,
-                "stdout_path": sr["stdout_path"],
-                "stderr_path": sr["stderr_path"],
-                "created_at": sr["created_at"],
-            }
-            for sr in step_results
-        ],
-        "events": [
-            {
-                "event_name": ev["event_name"],
-                "event_data": json.loads(ev["event_json"]),
-                "created_at": ev["created_at"],
-            }
-            for ev in events
-        ],
+        "step_results": [serialize_step_result(sr) for sr in step_results],
+        "events": [serialize_event(ev) for ev in events],
     }
 
     status: str = run["status"]
@@ -149,10 +130,7 @@ def query_inspect(
         status=status,
         exit_code=_status_to_exit_code(status),
         run_id=run_id,
-        workflow_id=run["workflow_id"],
-        workflow_name=run.get("workflow_name"),
-        workflow_description=run.get("workflow_description"),
-        workflow_version=run["workflow_version"],
+        **workflow_metadata(run),
         current_step_id=run["current_step_id"],
         result=detail,
     )
@@ -164,4 +142,4 @@ def _status_to_exit_code(status: str) -> int:
         "waiting": ExitCode.WAITING,
         "failed": ExitCode.STEP_FAILED,
         "cancelled": ExitCode.CANCELLED,
-    }.get(status, ExitCode.SUCCESS)
+    }.get(status, ExitCode.INTERNAL_ERROR)

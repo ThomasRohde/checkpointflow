@@ -1,0 +1,1656 @@
+warning: in the working copy of '.github/workflows/ci.yml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/checkpointflow/cli.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/checkpointflow/engine/lifecycle.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/checkpointflow/engine/queries.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/checkpointflow/gui/api.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/checkpointflow/gui/server.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/checkpointflow/models/state.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/checkpointflow/persistence/store.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_cli_smoke.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_evaluator.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_gui_server.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_models_state.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_persistence_store.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_queries.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_step_switch.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 1899809..fead300 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -67,6 +67,7 @@ jobs:
+           - ubuntu-latest
+           - windows-latest
+         python-version:
++          - "3.11"
+           - "3.13"
+           - "3.14"
+ 
+diff --git a/src/checkpointflow/cli.py b/src/checkpointflow/cli.py
+index 96e7ec2..c77d004 100644
+--- a/src/checkpointflow/cli.py
++++ b/src/checkpointflow/cli.py
+@@ -311,7 +311,7 @@ def cancel(
+     ],
+ ) -> None:
+     """Cancel a waiting or running run."""
+-    from checkpointflow.engine.runner import cancel_run
++    from checkpointflow.engine.lifecycle import cancel_run
+ 
+     envelope = cancel_run(run_id, reason, base_dir=_get_base_dir())
+     _emit(envelope)
+@@ -325,7 +325,7 @@ def delete(
+     ],
+ ) -> None:
+     """Permanently delete a completed, failed, or cancelled run."""
+-    from checkpointflow.engine.runner import delete_run
++    from checkpointflow.engine.lifecycle import delete_run
+ 
+     envelope = delete_run(run_id, base_dir=_get_base_dir())
+     _emit(envelope)
+diff --git a/src/checkpointflow/engine/lifecycle.py b/src/checkpointflow/engine/lifecycle.py
+index 122b04d..46bfbbb 100644
+--- a/src/checkpointflow/engine/lifecycle.py
++++ b/src/checkpointflow/engine/lifecycle.py
+@@ -6,6 +6,7 @@ from pathlib import Path
+ 
+ from checkpointflow.models.envelope import Envelope
+ from checkpointflow.models.errors import ErrorCode, ExitCode
++from checkpointflow.persistence.serializers import workflow_metadata
+ from checkpointflow.persistence.store import Store
+ 
+ 
+@@ -15,37 +16,34 @@ def delete_run(
+     base_dir: Path | None = None,
+ ) -> Envelope:
+     """Permanently delete a terminal run and all its data."""
+-    store = Store(base_dir=base_dir)
+-    run = store.get_run(run_id)
++    with Store(base_dir=base_dir) as store:
++        run = store.get_run(run_id)
+ 
+-    if run is None:
+-        return Envelope.failure(
+-            command="delete",
+-            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
+-            message=f"Run not found: {run_id}",
+-            exit_code=ExitCode.VALIDATION_ERROR,
+-        )
++        if run is None:
++            return Envelope.failure(
++                command="delete",
++                error_code=ErrorCode.ERR_RUN_NOT_FOUND,
++                message=f"Run not found: {run_id}",
++                exit_code=ExitCode.VALIDATION_ERROR,
++            )
+ 
+-    if run["status"] in ("created", "running", "waiting"):
+-        return Envelope.failure(
++        if run["status"] in ("created", "running", "waiting"):
++            return Envelope.failure(
++                command="delete",
++                error_code=ErrorCode.ERR_RUN_NOT_WAITING,
++                message=f"Cannot delete active run {run_id} (status: {run['status']})",
++                exit_code=ExitCode.RUNTIME_ERROR,
++                run_id=run_id,
++            )
++
++        store.delete_run(run_id)
++        return Envelope.success(
+             command="delete",
+-            error_code=ErrorCode.ERR_RUN_NOT_WAITING,
+-            message=f"Cannot delete active run {run_id} (status: {run['status']})",
+-            exit_code=ExitCode.RUNTIME_ERROR,
+             run_id=run_id,
++            **workflow_metadata(run),
++            result={"deleted": True},
+         )
+ 
+-    store.delete_run(run_id)
+-    return Envelope.success(
+-        command="delete",
+-        run_id=run_id,
+-        workflow_id=run["workflow_id"],
+-        workflow_name=run.get("workflow_name"),
+-        workflow_description=run.get("workflow_description"),
+-        workflow_version=run["workflow_version"],
+-        result={"deleted": True},
+-    )
+-
+ 
+ def cancel_run(
+     run_id: str,
+@@ -54,35 +52,32 @@ def cancel_run(
+     base_dir: Path | None = None,
+ ) -> Envelope:
+     """Cancel a waiting or running run."""
+-    store = Store(base_dir=base_dir)
+-    run = store.get_run(run_id)
++    with Store(base_dir=base_dir) as store:
++        run = store.get_run(run_id)
+ 
+-    if run is None:
+-        return Envelope.failure(
+-            command="cancel",
+-            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
+-            message=f"Run not found: {run_id}",
+-            exit_code=ExitCode.VALIDATION_ERROR,
+-        )
++        if run is None:
++            return Envelope.failure(
++                command="cancel",
++                error_code=ErrorCode.ERR_RUN_NOT_FOUND,
++                message=f"Run not found: {run_id}",
++                exit_code=ExitCode.VALIDATION_ERROR,
++            )
+ 
+-    if run["status"] not in ("waiting", "running", "created"):
+-        return Envelope.failure(
++        if run["status"] not in ("waiting", "running", "created"):
++            return Envelope.failure(
++                command="cancel",
++                error_code=ErrorCode.ERR_RUN_NOT_WAITING,
++                message=f"Run {run_id} cannot be cancelled (status: {run['status']})",
++                exit_code=ExitCode.RUNTIME_ERROR,
++                run_id=run_id,
++            )
++
++        store.update_run(run_id, status="cancelled")
++        return Envelope.success(
+             command="cancel",
+-            error_code=ErrorCode.ERR_RUN_NOT_WAITING,
+-            message=f"Run {run_id} cannot be cancelled (status: {run['status']})",
+-            exit_code=ExitCode.RUNTIME_ERROR,
++            status="cancelled",
++            exit_code=ExitCode.SUCCESS,
+             run_id=run_id,
++            **workflow_metadata(run),
++            result={"reason": reason},
+         )
+-
+-    store.update_run(run_id, status="cancelled")
+-    return Envelope.success(
+-        command="cancel",
+-        status="cancelled",
+-        exit_code=ExitCode.SUCCESS,
+-        run_id=run_id,
+-        workflow_id=run["workflow_id"],
+-        workflow_name=run.get("workflow_name"),
+-        workflow_description=run.get("workflow_description"),
+-        workflow_version=run["workflow_version"],
+-        result={"reason": reason},
+-    )
+diff --git a/src/checkpointflow/engine/queries.py b/src/checkpointflow/engine/queries.py
+index 37d0493..2cea006 100644
+--- a/src/checkpointflow/engine/queries.py
++++ b/src/checkpointflow/engine/queries.py
+@@ -9,6 +9,11 @@ import yaml
+ from checkpointflow.models.envelope import Envelope, WaitDetail, WaitResume
+ from checkpointflow.models.errors import ErrorCode, ExitCode
+ from checkpointflow.models.workflow import AwaitEventStep, WorkflowDocument
++from checkpointflow.persistence.serializers import (
++    serialize_event,
++    serialize_step_result,
++    workflow_metadata,
++)
+ from checkpointflow.persistence.store import Store
+ 
+ 
+@@ -18,8 +23,8 @@ def query_status(
+     base_dir: Path | None = None,
+ ) -> Envelope:
+     """Query the current status of a run."""
+-    store = Store(base_dir=base_dir)
+-    run = store.get_run(run_id)
++    with Store(base_dir=base_dir) as store:
++        run = store.get_run(run_id)
+ 
+     if run is None:
+         return Envelope.failure(
+@@ -34,10 +39,7 @@ def query_status(
+ 
+     kwargs: dict[str, Any] = {
+         "run_id": run_id,
+-        "workflow_id": run["workflow_id"],
+-        "workflow_name": run.get("workflow_name"),
+-        "workflow_description": run.get("workflow_description"),
+-        "workflow_version": run["workflow_version"],
++        **workflow_metadata(run),
+         "current_step_id": run["current_step_id"],
+     }
+ 
+@@ -102,45 +104,24 @@ def query_inspect(
+     base_dir: Path | None = None,
+ ) -> Envelope:
+     """Query detailed execution history of a run."""
+-    store = Store(base_dir=base_dir)
+-    run = store.get_run(run_id)
+-
+-    if run is None:
+-        return Envelope.failure(
+-            command="inspect",
+-            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
+-            message=f"Run not found: {run_id}",
+-            exit_code=ExitCode.VALIDATION_ERROR,
+-        )
+-
+-    step_results = store.get_step_results(run_id)
+-    events = store.get_events(run_id)
++    with Store(base_dir=base_dir) as store:
++        run = store.get_run(run_id)
++        if run is None:
++            return Envelope.failure(
++                command="inspect",
++                error_code=ErrorCode.ERR_RUN_NOT_FOUND,
++                message=f"Run not found: {run_id}",
++                exit_code=ExitCode.VALIDATION_ERROR,
++            )
++
++        step_results = store.get_step_results(run_id)
++        events = store.get_events(run_id)
+ 
+     detail: dict[str, Any] = {
+         "inputs": json.loads(run["inputs_json"]),
+         "step_outputs": json.loads(run["step_outputs_json"]),
+-        "step_results": [
+-            {
+-                "step_id": sr["step_id"],
+-                "step_kind": sr["step_kind"],
+-                "exit_code": sr["exit_code"],
+-                "error_code": sr["error_code"],
+-                "error_message": sr["error_message"],
+-                "outputs": json.loads(sr["outputs_json"]) if sr["outputs_json"] else None,
+-                "stdout_path": sr["stdout_path"],
+-                "stderr_path": sr["stderr_path"],
+-                "created_at": sr["created_at"],
+-            }
+-            for sr in step_results
+-        ],
+-        "events": [
+-            {
+-                "event_name": ev["event_name"],
+-                "event_data": json.loads(ev["event_json"]),
+-                "created_at": ev["created_at"],
+-            }
+-            for ev in events
+-        ],
++        "step_results": [serialize_step_result(sr) for sr in step_results],
++        "events": [serialize_event(ev) for ev in events],
+     }
+ 
+     status: str = run["status"]
+@@ -149,10 +130,7 @@ def query_inspect(
+         status=status,
+         exit_code=_status_to_exit_code(status),
+         run_id=run_id,
+-        workflow_id=run["workflow_id"],
+-        workflow_name=run.get("workflow_name"),
+-        workflow_description=run.get("workflow_description"),
+-        workflow_version=run["workflow_version"],
++        **workflow_metadata(run),
+         current_step_id=run["current_step_id"],
+         result=detail,
+     )
+@@ -164,4 +142,4 @@ def _status_to_exit_code(status: str) -> int:
+         "waiting": ExitCode.WAITING,
+         "failed": ExitCode.STEP_FAILED,
+         "cancelled": ExitCode.CANCELLED,
+-    }.get(status, ExitCode.SUCCESS)
++    }.get(status, ExitCode.INTERNAL_ERROR)
+diff --git a/src/checkpointflow/engine/runner.py b/src/checkpointflow/engine/runner.py
+index 509cdc1..677a440 100644
+--- a/src/checkpointflow/engine/runner.py
++++ b/src/checkpointflow/engine/runner.py
+@@ -1,8 +1,8 @@
+ from __future__ import annotations
+ 
+-import contextlib
+ import hashlib
+ import json
++import logging
+ from pathlib import Path
+ from typing import Any
+ 
+@@ -27,9 +27,11 @@ from checkpointflow.models.workflow import (
+     WorkflowDocument,
+     find_duplicate_step_ids,
+ )
+-from checkpointflow.persistence.store import PersistenceError, Store
++from checkpointflow.persistence.store import PersistenceError, RunRecord, Store
+ from checkpointflow.schema import validate_workflow_document
+ 
++logger = logging.getLogger(__name__)
++
+ 
+ class RunError(Exception):
+     pass
+@@ -67,19 +69,69 @@ def _build_wait_detail(
+     )
+ 
+ 
+-def _build_eval_context(
+-    inputs: dict[str, Any],
+-    step_outputs: dict[str, dict[str, Any]],
+-    event: dict[str, Any] | None = None,
+-) -> dict[str, Any]:
+-    """Build evaluation context for expressions."""
+-    ctx: dict[str, Any] = {
+-        "inputs": inputs,
+-        "steps": {sid: {"outputs": outs} for sid, outs in step_outputs.items()},
+-    }
+-    if event is not None:
+-        ctx["event"] = event
+-    return ctx
++def _handle_await_event(
++    step: AwaitEventStep,
++    ctx: RunContext,
++    store: Store,
++    run_id: str,
++    command: str,
++    wf_meta: dict[str, Any],
++) -> Envelope:
++    """Persist waiting state and return a waiting envelope."""
++    store.update_run(
++        run_id,
++        status="waiting",
++        current_step_id=step.id,
++        expected_event_name=step.event_name,
++        expected_event_schema=json.dumps(step.input_schema),
++    )
++    wait_detail = _build_wait_detail(step, run_id, eval_ctx=ctx.build_eval_context())
++    return Envelope.success(
++        command=command,
++        status="waiting",
++        exit_code=ExitCode.WAITING,
++        run_id=run_id,
++        **wf_meta,
++        current_step_id=step.id,
++        wait=wait_detail,
++    )
++
++
++def _handle_end_step(
++    result: Any,
++    store: Store,
++    run_id: str,
++    step_id: str,
++    command: str,
++    wf_meta: dict[str, Any],
++) -> Envelope:
++    """Persist completion and return a completed envelope."""
++    final_result = result.outputs if result.outputs else {}
++    store.update_run(
++        run_id,
++        status="completed",
++        result_json=json.dumps(final_result),
++    )
++    return Envelope.success(
++        command=command,
++        run_id=run_id,
++        **wf_meta,
++        current_step_id=step_id,
++        result=final_result if final_result else None,
++    )
++
++
++def resolve_switch_jump(
++    result_outputs: dict[str, Any],
++    all_steps: list[Any],
++    step_ids: list[str],
++) -> tuple[list[Any], int] | None:
++    """Resolve a SwitchStep jump target. Returns (remaining_steps, target_idx) or None."""
++    next_step_id = result_outputs.get("_next_step_id")
++    if next_step_id and next_step_id in step_ids:
++        target_idx = step_ids.index(next_step_id)
++        return list(all_steps[target_idx:]), target_idx
++    return None
+ 
+ 
+ def _execute_steps(
+@@ -108,10 +160,18 @@ def _execute_steps(
+         step = steps[idx]
+         order = start_order + idx
+ 
++        ctx = RunContext(
++            run_id=run_id,
++            inputs=inputs,
++            step_outputs=step_outputs,
++            run_dir=run_dir,
++            defaults=workflow.defaults or {},
++        )
++
+         # Check if condition
+         if step.step_if:
+             condition = strip_expression_wrapper(step.step_if)
+-            eval_ctx = _build_eval_context(inputs, step_outputs)
++            eval_ctx = ctx.build_eval_context()
+             try:
+                 if not evaluate_condition(condition, eval_ctx):
+                     idx += 1
+@@ -129,16 +189,10 @@ def _execute_steps(
+                 )
+ 
+         # Update run status
+-        with contextlib.suppress(PersistenceError):
++        try:
+             store.update_run(run_id, status="running", current_step_id=step.id)
+-
+-        ctx = RunContext(
+-            run_id=run_id,
+-            inputs=inputs,
+-            step_outputs=step_outputs,
+-            run_dir=run_dir,
+-            defaults=workflow.defaults or {},
+-        )
++        except PersistenceError:
++            logger.warning("Failed to update run %s status to running", run_id)
+ 
+         # Dispatch step handler
+         result = dispatch_step(step, ctx, workflow_steps=all_steps)
+@@ -178,58 +232,20 @@ def _execute_steps(
+ 
+         # AwaitEventStep: halt and return waiting envelope
+         if isinstance(step, AwaitEventStep):
+-            store.update_run(
+-                run_id,
+-                status="waiting",
+-                current_step_id=step.id,
+-                expected_event_name=step.event_name,
+-                expected_event_schema=json.dumps(step.input_schema),
+-            )
+-            wait_eval_ctx = _build_eval_context(inputs, step_outputs)
+-            wait_detail = _build_wait_detail(step, run_id, eval_ctx=wait_eval_ctx)
+-            return Envelope.success(
+-                command=command,
+-                status="waiting",
+-                exit_code=ExitCode.WAITING,
+-                run_id=run_id,
+-                **wf_meta,
+-                current_step_id=step.id,
+-                wait=wait_detail,
+-            )
++            return _handle_await_event(step, ctx, store, run_id, command, wf_meta)
+ 
+         # EndStep: terminate workflow
+         if isinstance(step, EndStep):
+-            final_result = result.outputs if result.outputs else {}
+-            store.update_run(
+-                run_id,
+-                status="completed",
+-                result_json=json.dumps(final_result),
+-            )
+-            return Envelope.success(
+-                command=command,
+-                run_id=run_id,
+-                **wf_meta,
+-                current_step_id=step.id,
+-                result=final_result if final_result else None,
+-            )
++            return _handle_end_step(result, store, run_id, step.id, command, wf_meta)
+ 
+-        # SwitchStep: jump to the target step
++        # SwitchStep: jump to the target step (iterative, not recursive)
+         if isinstance(step, SwitchStep) and result.outputs:
+-            next_step_id = result.outputs.get("_next_step_id")
+-            if next_step_id and next_step_id in step_ids:
+-                target_idx = step_ids.index(next_step_id)
+-                remaining = list(all_steps[target_idx:])
+-                return _execute_steps(
+-                    workflow,
+-                    store,
+-                    run_id,
+-                    run_dir,
+-                    inputs,
+-                    step_outputs,
+-                    remaining,
+-                    order + 1,
+-                    command,
+-                )
++            jump = resolve_switch_jump(result.outputs, all_steps, step_ids)
++            if jump is not None:
++                steps, _ = jump
++                start_order = order + 1
++                idx = 0
++                continue
+ 
+         idx += 1
+ 
+@@ -353,21 +369,22 @@ def _run_workflow_inner(
+             exit_code=ExitCode.PERSISTENCE_ERROR,
+         )
+ 
+-    workflow_hash = hashlib.sha256(raw_text.encode()).hexdigest()
+-    run_id = store.create_run(
+-        workflow_id=workflow.id,
+-        workflow_name=workflow.name,
+-        workflow_description=workflow.description,
+-        workflow_version=workflow.version,
+-        workflow_hash=workflow_hash,
+-        workflow_path=str(workflow_path.resolve()),
+-        inputs_json=json.dumps(inputs),
+-    )
++    with store:
++        workflow_hash = hashlib.sha256(raw_text.encode()).hexdigest()
++        run_id = store.create_run(
++            workflow_id=workflow.id,
++            workflow_name=workflow.name,
++            workflow_description=workflow.description,
++            workflow_version=workflow.version,
++            workflow_hash=workflow_hash,
++            workflow_path=str(workflow_path.resolve()),
++            inputs_json=json.dumps(inputs),
++        )
+ 
+-    run_dir = store.run_dir(run_id)
+-    return _execute_steps(
+-        workflow, store, run_id, run_dir, inputs, {}, list(workflow.steps), 0, "run"
+-    )
++        run_dir = store.run_dir(run_id)
++        return _execute_steps(
++            workflow, store, run_id, run_dir, inputs, {}, list(workflow.steps), 0, "run"
++        )
+ 
+ 
+ # --- resume_workflow ---
+@@ -401,9 +418,19 @@ def _resume_workflow_inner(
+     base_dir: Path | None = None,
+ ) -> Envelope:
+     store = Store(base_dir=base_dir)
++    with store:
++        return _resume_inner_with_store(store, run_id, event_name, event_input_raw)
++
++
++def _validate_resume(
++    store: Store,
++    run_id: str,
++    event_name: str,
++    event_input_raw: str,
++) -> Envelope | tuple[RunRecord, dict[str, Any]]:
++    """Validate all resume preconditions. Returns error Envelope or (run, event_data)."""
+     run = store.get_run(run_id)
+ 
+-    # Verify run exists
+     if run is None:
+         return Envelope.failure(
+             command="resume",
+@@ -412,7 +439,6 @@ def _resume_workflow_inner(
+             exit_code=ExitCode.VALIDATION_ERROR,
+         )
+ 
+-    # Verify waiting state
+     if run["status"] != "waiting":
+         return Envelope.failure(
+             command="resume",
+@@ -422,7 +448,6 @@ def _resume_workflow_inner(
+             run_id=run_id,
+         )
+ 
+-    # Verify event name
+     if event_name != run["expected_event_name"]:
+         return Envelope.failure(
+             command="resume",
+@@ -432,7 +457,6 @@ def _resume_workflow_inner(
+             run_id=run_id,
+         )
+ 
+-    # Parse event input
+     try:
+         event_data = _parse_input(event_input_raw)
+     except FileNotFoundError as exc:
+@@ -452,7 +476,7 @@ def _resume_workflow_inner(
+             run_id=run_id,
+         )
+ 
+-    # Validate event against schema
++    assert run["expected_event_schema"] is not None
+     expected_schema = json.loads(run["expected_event_schema"])
+     event_validator = Draft202012Validator(expected_schema)
+     event_errors = [e.message for e in event_validator.iter_errors(event_data)]
+@@ -466,6 +490,20 @@ def _resume_workflow_inner(
+             details=event_errors,
+         )
+ 
++    return run, event_data
++
++
++def _resume_inner_with_store(
++    store: Store,
++    run_id: str,
++    event_name: str,
++    event_input_raw: str,
++) -> Envelope:
++    validated = _validate_resume(store, run_id, event_name, event_input_raw)
++    if isinstance(validated, Envelope):
++        return validated
++    run, event_data = validated
++
+     # Record event
+     store.insert_event(
+         run_id=run_id,
+@@ -499,10 +537,11 @@ def _resume_workflow_inner(
+     doc = WorkflowDocument.model_validate(yaml.safe_load(raw_text))
+     workflow = doc.workflow
+ 
+-    # Restore state
++    # Restore state — current_step_id is always set for waiting runs
+     inputs: dict[str, Any] = json.loads(run["inputs_json"])
+     step_outputs: dict[str, dict[str, Any]] = json.loads(run["step_outputs_json"])
+     current_step_id = run["current_step_id"]
++    assert current_step_id is not None
+ 
+     # Store event data as the await_event step's outputs
+     step_outputs[current_step_id] = event_data
+@@ -515,7 +554,13 @@ def _resume_workflow_inner(
+     # Evaluate transitions
+     next_step_id: str | None = None
+     if isinstance(await_step, AwaitEventStep) and await_step.transitions:
+-        eval_ctx = _build_eval_context(inputs, step_outputs, event=event_data)
++        resume_ctx = RunContext(
++            run_id=run_id,
++            inputs=inputs,
++            step_outputs=step_outputs,
++            run_dir=store.run_dir(run_id),
++        )
++        eval_ctx = resume_ctx.build_eval_context(event=event_data)
+         for transition in await_step.transitions:
+             condition = strip_expression_wrapper(transition.when)
+             try:
+@@ -575,8 +620,3 @@ def _resume_workflow_inner(
+         start_order,
+         "resume",
+     )
+-
+-
+-# Re-export lifecycle operations for backward compatibility
+-from checkpointflow.engine.lifecycle import cancel_run as cancel_run  # noqa: E402
+-from checkpointflow.engine.lifecycle import delete_run as delete_run  # noqa: E402
+diff --git a/src/checkpointflow/engine/steps/api_step.py b/src/checkpointflow/engine/steps/api_step.py
+index fcf2815..85c0589 100644
+--- a/src/checkpointflow/engine/steps/api_step.py
++++ b/src/checkpointflow/engine/steps/api_step.py
+@@ -1,6 +1,8 @@
+ from __future__ import annotations
+ 
++import ipaddress
+ import json
++import socket
+ import urllib.error
+ import urllib.parse
+ import urllib.request
+@@ -12,6 +14,19 @@ from checkpointflow.models.state import RunContext, StepResult
+ from checkpointflow.models.workflow import ApiStep
+ 
+ 
++def _is_blocked_host(hostname: str) -> bool:
++    """Return True if the hostname resolves to a link-local IP (SSRF protection)."""
++    try:
++        addr = ipaddress.ip_address(hostname)
++    except ValueError:
++        # Not a literal IP — resolve hostname
++        try:
++            addr = ipaddress.ip_address(socket.gethostbyname(hostname))
++        except (socket.gaierror, ValueError):
++            return False
++    return addr.is_link_local
++
++
+ def execute(step: ApiStep, ctx: RunContext) -> StepResult:
+     """Execute an HTTP request and return the response as outputs."""
+     eval_ctx = ctx.build_eval_context()
+@@ -38,6 +53,19 @@ def execute(step: ApiStep, ctx: RunContext) -> StepResult:
+             ),
+         )
+ 
++    # Block requests to link-local and cloud metadata endpoints (SSRF protection)
++    hostname = parsed_url.hostname or ""
++    blocked = _is_blocked_host(hostname)
++    if blocked:
++        return StepResult(
++            success=False,
++            error_code=ErrorCode.ERR_STEP_FAILED,
++            error_message=(
++                f"Step '{step.id}' URL targets a blocked address ({hostname}). "
++                f"Requests to link-local and cloud metadata endpoints are not allowed."
++            ),
++        )
++
+     # Build request body
+     data: bytes | None = None
+     if step.body is not None:
+diff --git a/src/checkpointflow/engine/steps/parallel_step.py b/src/checkpointflow/engine/steps/parallel_step.py
+index d393d01..d26b4a0 100644
+--- a/src/checkpointflow/engine/steps/parallel_step.py
++++ b/src/checkpointflow/engine/steps/parallel_step.py
+@@ -67,7 +67,18 @@ def execute(
+ 
+     with ThreadPoolExecutor(max_workers=len(branch_steps)) as executor:
+         futures = {
+-            executor.submit(_run_branch, bstep, ctx, workflow_steps=workflow_steps): step_id
++            executor.submit(
++                _run_branch,
++                bstep,
++                RunContext(
++                    run_id=ctx.run_id,
++                    inputs=ctx.inputs,
++                    step_outputs=dict(ctx.step_outputs),
++                    run_dir=ctx.run_dir,
++                    defaults=ctx.defaults,
++                ),
++                workflow_steps=workflow_steps,
++            ): step_id
+             for step_id, bstep in branch_steps
+         }
+         for future in as_completed(futures):
+diff --git a/src/checkpointflow/engine/steps/switch_step.py b/src/checkpointflow/engine/steps/switch_step.py
+index ea6991f..a69cc2d 100644
+--- a/src/checkpointflow/engine/steps/switch_step.py
++++ b/src/checkpointflow/engine/steps/switch_step.py
+@@ -9,19 +9,24 @@ from checkpointflow.models.workflow import SwitchStep
+ def execute(step: SwitchStep, ctx: RunContext) -> StepResult:
+     """Evaluate switch cases and return the target step ID in outputs."""
+     eval_ctx = ctx.build_eval_context()
++    eval_errors: list[str] = []
+ 
+     for case in step.cases:
+         try:
+             if evaluate_condition(case.when, eval_ctx):
+                 return StepResult(success=True, outputs={"_next_step_id": case.next})
+-        except EvaluatorError:
++        except EvaluatorError as exc:
++            eval_errors.append(f"case '{case.when}': {exc}")
+             continue
+ 
+     if step.default is not None:
+         return StepResult(success=True, outputs={"_next_step_id": step.default})
+ 
++    msg = f"No case matched in switch step '{step.id}' and no default defined."
++    if eval_errors:
++        msg += f" Evaluation errors: {'; '.join(eval_errors)}"
+     return StepResult(
+         success=False,
+         error_code=ErrorCode.ERR_STEP_FAILED,
+-        error_message=f"No case matched in switch step '{step.id}' and no default defined.",
++        error_message=msg,
+     )
+diff --git a/src/checkpointflow/engine/steps/workflow_ref_step.py b/src/checkpointflow/engine/steps/workflow_ref_step.py
+index 33fb64e..abdb16b 100644
+--- a/src/checkpointflow/engine/steps/workflow_ref_step.py
++++ b/src/checkpointflow/engine/steps/workflow_ref_step.py
+@@ -105,12 +105,14 @@ def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
+ 
+         # SwitchStep: jump to target
+         if isinstance(sub_step, SwitchStep) and result.outputs:
+-            next_step_id = result.outputs.get("_next_step_id")
+-            if next_step_id:
+-                step_ids = [s.id for s in all_sub_steps]
+-                if next_step_id in step_ids:
+-                    idx = step_ids.index(next_step_id)
+-                    continue
++            from checkpointflow.engine.runner import resolve_switch_jump
++
++            sub_step_ids = [s.id for s in all_sub_steps]
++            jump = resolve_switch_jump(result.outputs, all_sub_steps, sub_step_ids)
++            if jump is not None:
++                _, target_idx = jump
++                idx = target_idx
++                continue
+ 
+         idx += 1
+ 
+diff --git a/src/checkpointflow/gui/api.py b/src/checkpointflow/gui/api.py
+index 033c2b0..6b49f49 100644
+--- a/src/checkpointflow/gui/api.py
++++ b/src/checkpointflow/gui/api.py
+@@ -10,10 +10,11 @@ from typing import Any
+ import yaml
+ 
+ from checkpointflow.models.workflow import WorkflowDocument
+-from checkpointflow.persistence.store import Store
++from checkpointflow.persistence.serializers import serialize_event, serialize_step_result
++from checkpointflow.persistence.store import RunSummary, Store
+ 
+ 
+-def list_runs(store: Store) -> list[dict[str, Any]]:
++def list_runs(store: Store) -> list[RunSummary]:
+     """List all runs from the store."""
+     return store.list_runs()
+ 
+@@ -33,28 +34,10 @@ def get_run_detail(store: Store, run_id: str) -> dict[str, Any] | None:
+         "step_outputs": json.loads(run["step_outputs_json"]),
+         "result": json.loads(run["result_json"]) if run["result_json"] else None,
+         "step_results": [
+-            {
+-                "step_id": sr["step_id"],
+-                "step_kind": sr["step_kind"],
+-                "exit_code": sr["exit_code"],
+-                "error_code": sr["error_code"],
+-                "error_message": sr["error_message"],
+-                "outputs": json.loads(sr["outputs_json"]) if sr["outputs_json"] else None,
+-                "stdout_path": sr["stdout_path"],
+-                "stderr_path": sr["stderr_path"],
+-                "execution_order": sr["execution_order"],
+-                "created_at": sr["created_at"],
+-            }
++            {**serialize_step_result(sr), "execution_order": sr["execution_order"]}
+             for sr in step_results
+         ],
+-        "events": [
+-            {
+-                "event_name": ev["event_name"],
+-                "event_data": json.loads(ev["event_json"]),
+-                "created_at": ev["created_at"],
+-            }
+-            for ev in events
+-        ],
++        "events": [serialize_event(ev) for ev in events],
+     }
+ 
+ 
+diff --git a/src/checkpointflow/gui/server.py b/src/checkpointflow/gui/server.py
+index 1ba1b87..284547e 100644
+--- a/src/checkpointflow/gui/server.py
++++ b/src/checkpointflow/gui/server.py
+@@ -2,8 +2,10 @@
+ 
+ from __future__ import annotations
+ 
++import secrets
+ import webbrowser
+-from collections.abc import MutableMapping
++from collections.abc import AsyncGenerator, MutableMapping
++from contextlib import asynccontextmanager
+ from pathlib import Path
+ from typing import Any
+ 
+@@ -55,14 +57,93 @@ class SecurityHeadersMiddleware:
+         await self.app(scope, receive, send_with_headers)
+ 
+ 
++class CORSMiddleware:
++    """Restrict cross-origin requests to localhost origins only."""
++
++    _ALLOWED_ORIGIN_PREFIX = b"http://localhost"
++
++    def __init__(self, app: ASGIApp) -> None:
++        self.app = app
++
++    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
++        if scope["type"] != "http":
++            await self.app(scope, receive, send)
++            return
++
++        headers = dict(scope.get("headers", []))
++        origin = headers.get(b"origin", b"")
++
++        if not origin.startswith(self._ALLOWED_ORIGIN_PREFIX):
++            # No CORS headers for non-localhost origins
++            await self.app(scope, receive, send)
++            return
++
++        method: str = scope.get("method", "")
++        if method == "OPTIONS":
++            # Preflight response
++            await send(
++                {
++                    "type": "http.response.start",
++                    "status": 204,
++                    "headers": [
++                        (b"access-control-allow-origin", origin),
++                        (b"access-control-allow-methods", b"GET, POST, DELETE, OPTIONS"),
++                        (b"access-control-allow-headers", b"authorization, content-type"),
++                        (b"access-control-max-age", b"3600"),
++                    ],
++                }
++            )
++            await send({"type": "http.response.body", "body": b""})
++            return
++
++        async def send_with_cors(message: MutableMapping[str, Any]) -> None:
++            if message["type"] == "http.response.start":
++                msg_headers = list(message.get("headers", []))
++                msg_headers.append((b"access-control-allow-origin", origin))
++                message["headers"] = msg_headers
++            await send(message)
++
++        await self.app(scope, receive, send_with_cors)
++
++
++class TokenAuthMiddleware:
++    """Require a bearer token or query-param token on /api/ routes."""
++
++    def __init__(self, app: ASGIApp, token: str) -> None:
++        self.app = app
++        self.token = token
++
++    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
++        if (
++            scope["type"] == "http"
++            and scope.get("path", "").startswith("/api/")
++            and not self._check_token(scope)
++        ):
++            response = JSONResponse({"error": "Unauthorized"}, status_code=401)
++            await response(scope, receive, send)
++            return
++        await self.app(scope, receive, send)
++
++    def _check_token(self, scope: Scope) -> bool:
++        # Check Authorization header
++        headers = dict(scope.get("headers", []))
++        auth = headers.get(b"authorization", b"").decode()
++        if auth == f"Bearer {self.token}":
++            return True
++        # Check query param
++        qs: str = scope.get("query_string", b"").decode()
++        return any(part.startswith("token=") and part[6:] == self.token for part in qs.split("&"))
++
++
+ def _json(data: Any, status: int = 200) -> JSONResponse:
+     return JSONResponse(data, status_code=status)
+ 
+ 
+-def create_app(base_dir: Path | None = None) -> Starlette:
+-    """Create the Starlette ASGI app."""
++def create_app(base_dir: Path | None = None) -> tuple[Starlette, str]:
++    """Create the Starlette ASGI app. Returns (app, auth_token)."""
+     resolved_base = base_dir or Path.home() / ".checkpointflow"
+     store = Store(base_dir=resolved_base)
++    token = secrets.token_urlsafe(32)
+ 
+     async def api_runs(request: Request) -> Response:
+         return _json(list_runs(store))
+@@ -145,7 +226,14 @@ def create_app(base_dir: Path | None = None) -> Starlette:
+     # SPA fallback for all other routes
+     routes.append(Route("/{path:path}", spa_fallback))
+ 
+-    return SecurityHeadersMiddleware(Starlette(routes=routes))  # type: ignore[return-value]
++    @asynccontextmanager
++    async def lifespan(_app: Starlette) -> AsyncGenerator[None]:
++        yield
++        store.close()
++
++    inner = Starlette(routes=routes, lifespan=lifespan)
++    app = SecurityHeadersMiddleware(CORSMiddleware(TokenAuthMiddleware(inner, token)))
++    return app, token  # type: ignore[return-value]
+ 
+ 
+ def run_server(port: int = 8420, base_dir: Path | None = None) -> None:
+@@ -159,8 +247,8 @@ def run_server(port: int = 8420, base_dir: Path | None = None) -> None:
+     if sys.platform == "win32":
+         signal.signal(signal.SIGINT, signal.SIG_DFL)
+ 
+-    app = create_app(base_dir=base_dir)
+-    url = f"http://localhost:{port}"
++    app, token = create_app(base_dir=base_dir)
++    url = f"http://localhost:{port}?token={token}"
+     print(f"checkpointflow dashboard: {url}")
+     webbrowser.open(url)
+     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+diff --git a/src/checkpointflow/models/state.py b/src/checkpointflow/models/state.py
+index 403f72b..83172ef 100644
+--- a/src/checkpointflow/models/state.py
++++ b/src/checkpointflow/models/state.py
+@@ -13,12 +13,15 @@ class RunContext:
+     run_dir: Path
+     defaults: dict[str, Any] = field(default_factory=dict)
+ 
+-    def build_eval_context(self) -> dict[str, Any]:
++    def build_eval_context(self, event: dict[str, Any] | None = None) -> dict[str, Any]:
+         """Build the evaluation context dict for expression interpolation."""
+-        return {
++        ctx: dict[str, Any] = {
+             "inputs": self.inputs,
+             "steps": {sid: {"outputs": outs} for sid, outs in self.step_outputs.items()},
+         }
++        if event is not None:
++            ctx["event"] = event
++        return ctx
+ 
+ 
+ @dataclass
+diff --git a/src/checkpointflow/persistence/store.py b/src/checkpointflow/persistence/store.py
+index eed8c34..8601048 100644
+--- a/src/checkpointflow/persistence/store.py
++++ b/src/checkpointflow/persistence/store.py
+@@ -5,13 +5,47 @@ import uuid
+ from datetime import UTC, datetime
+ from pathlib import Path
+ from types import TracebackType
+-from typing import Any
++from typing import Any, TypedDict, cast
+ 
+ 
+ class PersistenceError(Exception):
+     pass
+ 
+ 
++class RunRecord(TypedDict):
++    """Full row from the runs table."""
++
++    run_id: str
++    workflow_id: str
++    workflow_name: str | None
++    workflow_description: str | None
++    workflow_version: str | None
++    workflow_hash: str
++    workflow_path: str
++    status: str
++    current_step_id: str | None
++    expected_event_name: str | None
++    expected_event_schema: str | None
++    inputs_json: str
++    step_outputs_json: str
++    result_json: str | None
++    created_at: str
++    updated_at: str
++
++
++class RunSummary(TypedDict):
++    """Subset of columns returned by list_runs."""
++
++    run_id: str
++    workflow_id: str
++    workflow_version: str | None
++    workflow_path: str
++    status: str
++    current_step_id: str | None
++    created_at: str
++    updated_at: str
++
++
+ _SCHEMA_SQL = """\
+ CREATE TABLE IF NOT EXISTS runs (
+     run_id TEXT PRIMARY KEY,
+@@ -63,6 +97,20 @@ CREATE INDEX IF NOT EXISTS idx_step_results_run_id ON step_results(run_id, execu
+ """
+ 
+ 
++_UPDATABLE_COLUMNS: frozenset[str] = frozenset(
++    {
++        "status",
++        "current_step_id",
++        "expected_event_name",
++        "expected_event_schema",
++        "inputs_json",
++        "step_outputs_json",
++        "result_json",
++        "updated_at",
++    }
++)
++
++
+ class Store:
+     """Manages SQLite database and artifact storage for workflow runs."""
+ 
+@@ -127,37 +175,41 @@ class Store:
+         self._conn.commit()
+         return run_id
+ 
+-    def get_run(self, run_id: str) -> dict[str, Any] | None:
++    def get_run(self, run_id: str) -> RunRecord | None:
+         cursor = self._conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
+         row = cursor.fetchone()
+         if row is None:
+             return None
+-        return dict(row)
++        return cast(RunRecord, dict(row))
+ 
+-    def list_runs(self) -> list[dict[str, Any]]:
++    def list_runs(self) -> list[RunSummary]:
+         """List all runs, ordered by creation time descending."""
+         cursor = self._conn.execute(
+             "SELECT run_id, workflow_id, workflow_version, workflow_path, "
+             "status, current_step_id, created_at, updated_at "
+             "FROM runs ORDER BY created_at DESC"
+         )
+-        return [dict(row) for row in cursor.fetchall()]
++        return [cast(RunSummary, dict(row)) for row in cursor.fetchall()]
+ 
+     def update_run(self, run_id: str, **kwargs: Any) -> None:
+         if not kwargs:
+             return
+-        # Verify run exists
+-        if self.get_run(run_id) is None:
+-            msg = f"Run not found: {run_id}"
++        # Validate column names against whitelist
++        invalid = kwargs.keys() - _UPDATABLE_COLUMNS
++        if invalid:
++            msg = f"Invalid column names: {', '.join(sorted(invalid))}"
+             raise PersistenceError(msg)
+ 
+         kwargs["updated_at"] = self._now()
+         set_clause = ", ".join(f"{k} = ?" for k in kwargs)
+         values = [*kwargs.values(), run_id]
+-        self._conn.execute(
++        cursor = self._conn.execute(
+             f"UPDATE runs SET {set_clause} WHERE run_id = ?",
+             values,
+         )
++        if cursor.rowcount == 0:
++            msg = f"Run not found: {run_id}"
++            raise PersistenceError(msg)
+         self._conn.commit()
+ 
+     def insert_step_result(
+@@ -238,8 +290,9 @@ class Store:
+             msg = f"Run not found: {run_id}"
+             raise PersistenceError(msg)
+ 
+-        if run["status"] in ("created", "running", "waiting"):
+-            msg = f"Cannot delete run {run_id} (status: {run['status']})"
++        status = run["status"]
++        if status in ("created", "running", "waiting"):
++            msg = f"Cannot delete run {run_id} (status: {status})"
+             raise PersistenceError(msg)
+ 
+         # Delete child rows first, then the run
+diff --git a/tests/test_cli_smoke.py b/tests/test_cli_smoke.py
+index 07a3ce0..566a469 100644
+--- a/tests/test_cli_smoke.py
++++ b/tests/test_cli_smoke.py
+@@ -1,5 +1,6 @@
+ from typer.testing import CliRunner
+ 
++from checkpointflow import __version__
+ from checkpointflow.cli import app
+ 
+ 
+@@ -8,3 +9,10 @@ def test_help_smoke() -> None:
+ 
+     assert result.exit_code == 0
+     assert "checkpointflow" in result.stdout
++
++
++def test_version_flag() -> None:
++    result = CliRunner().invoke(app, ["--version"])
++
++    assert result.exit_code == 0
++    assert __version__ in result.stdout
+diff --git a/tests/test_evaluator.py b/tests/test_evaluator.py
+index ffccd46..f634cd4 100644
+--- a/tests/test_evaluator.py
++++ b/tests/test_evaluator.py
+@@ -6,6 +6,7 @@ import pytest
+ 
+ from checkpointflow.engine.evaluator import (
+     EvaluatorError,
++    _parse_literal,
+     evaluate_condition,
+     interpolate,
+     interpolate_values,
+@@ -134,6 +135,40 @@ def test_evaluate_condition_or(ctx: dict[str, Any]) -> None:
+     assert evaluate_condition('inputs.page_id == "999" or inputs.page_id == "123"', ctx) is True
+ 
+ 
++def test_evaluate_condition_int_comparison(ctx: dict[str, Any]) -> None:
++    assert evaluate_condition("inputs.count == 42", ctx) is True
++
++
++def test_evaluate_condition_int_mismatch(ctx: dict[str, Any]) -> None:
++    assert evaluate_condition("inputs.count == 99", ctx) is False
++
++
++def test_evaluate_condition_mixed_type_string_vs_int(ctx: dict[str, Any]) -> None:
++    # count is int 42, comparing against string "42" — type coercion should match
++    assert evaluate_condition('inputs.count == "42"', ctx) is True
++
++
++# --- _parse_literal ---
++
++
++def test_parse_literal_int() -> None:
++    assert _parse_literal("42") == 42
++    assert isinstance(_parse_literal("42"), int)
++
++
++def test_parse_literal_float() -> None:
++    assert _parse_literal("3.14") == 3.14
++    assert isinstance(_parse_literal("3.14"), float)
++
++
++def test_parse_literal_null() -> None:
++    assert _parse_literal("null") is None
++
++
++def test_parse_literal_bare_token() -> None:
++    assert _parse_literal("hello") == "hello"
++
++
+ # --- strip_expression_wrapper ---
+ 
+ 
+diff --git a/tests/test_gui_server.py b/tests/test_gui_server.py
+index 87a27f2..01e1cf4 100644
+--- a/tests/test_gui_server.py
++++ b/tests/test_gui_server.py
+@@ -23,8 +23,8 @@ def store(base_dir: Path) -> Store:
+ 
+ @pytest.fixture()
+ def client(base_dir: Path) -> TestClient:
+-    app = create_app(base_dir=base_dir)
+-    return TestClient(app)
++    app, token = create_app(base_dir=base_dir)
++    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+ 
+ 
+ def _make_completed_run(store: Store) -> str:
+@@ -106,6 +106,33 @@ def test_api_step_stream_invalid(client: TestClient) -> None:
+     assert resp.status_code == 400
+ 
+ 
++def test_api_step_stream_path_traversal_run_id(client: TestClient, store: Store) -> None:
++    """Verify _safe_path_component rejects '..' in run_id."""
++    from checkpointflow.gui.api import get_step_output
++
++    result = get_step_output(store, "../etc", "s1", "stdout")
++    assert result is None
++
++
++def test_api_step_stream_path_traversal_step_id(client: TestClient, store: Store) -> None:
++    """Verify _safe_path_component rejects '..' in step_id."""
++    from checkpointflow.gui.api import get_step_output
++
++    result = get_step_output(store, "valid_id", "../etc/passwd", "stdout")
++    assert result is None
++
++
++def test_api_step_stream_stdout_success(client: TestClient, store: Store, base_dir: Path) -> None:
++    run_id = _make_completed_run(store)
++    # Write a fake stdout file
++    stdout_dir = base_dir / "runs" / run_id / "stdout"
++    stdout_dir.mkdir(parents=True, exist_ok=True)
++    (stdout_dir / "step1.txt").write_text("hello world", encoding="utf-8")
++    resp = client.get(f"/api/runs/{run_id}/steps/step1/stdout")
++    assert resp.status_code == 200
++    assert resp.text == "hello world"
++
++
+ # --- /api/workflows ---
+ 
+ 
+@@ -125,9 +152,69 @@ def test_security_headers_present(client: TestClient) -> None:
+     assert "default-src" in resp.headers["content-security-policy"]
+ 
+ 
++# --- Auth token ---
++
++
++def test_api_rejects_request_without_token(base_dir: Path) -> None:
++    app, _token = create_app(base_dir=base_dir)
++    client = TestClient(app)
++    resp = client.get("/api/runs", headers={})
++    assert resp.status_code == 401
++
++
++def test_api_accepts_bearer_token(base_dir: Path) -> None:
++    app, token = create_app(base_dir=base_dir)
++    client = TestClient(app)
++    resp = client.get("/api/runs", headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200
++
++
++def test_api_accepts_query_param_token(base_dir: Path) -> None:
++    app, token = create_app(base_dir=base_dir)
++    client = TestClient(app)
++    resp = client.get(f"/api/runs?token={token}")
++    assert resp.status_code == 200
++
++
++def test_api_rejects_wrong_token(base_dir: Path) -> None:
++    app, _token = create_app(base_dir=base_dir)
++    client = TestClient(app)
++    resp = client.get("/api/runs", headers={"Authorization": "Bearer wrong"})
++    assert resp.status_code == 401
++
++
++def test_static_routes_skip_auth(base_dir: Path) -> None:
++    app, _token = create_app(base_dir=base_dir)
++    client = TestClient(app)
++    # SPA fallback should not require auth
++    resp = client.get("/some/random/path")
++    assert resp.status_code in (200, 503)
++
++
+ # --- SPA fallback ---
+ 
+ 
+ def test_spa_fallback(client: TestClient) -> None:
+     resp = client.get("/some/random/path")
+     assert resp.status_code in (200, 503)
++
++
++# --- CORS ---
++
++
++def test_cors_preflight_returns_headers(base_dir: Path) -> None:
++    app, token = create_app(base_dir=base_dir)
++    client = TestClient(app, headers={"Authorization": f"Bearer {token}"})
++    resp = client.options(
++        "/api/runs",
++        headers={"Origin": "http://localhost:8420", "Access-Control-Request-Method": "GET"},
++    )
++    assert resp.status_code == 204
++    assert resp.headers["access-control-allow-origin"] == "http://localhost:8420"
++
++
++def test_cors_rejects_non_localhost_origin(base_dir: Path) -> None:
++    app, token = create_app(base_dir=base_dir)
++    client = TestClient(app, headers={"Authorization": f"Bearer {token}"})
++    resp = client.get("/api/runs", headers={"Origin": "http://evil.com"})
++    assert "access-control-allow-origin" not in resp.headers
+diff --git a/tests/test_models_state.py b/tests/test_models_state.py
+index c490910..1d4b8d9 100644
+--- a/tests/test_models_state.py
++++ b/tests/test_models_state.py
+@@ -32,6 +32,25 @@ def test_run_context_build_eval_context(tmp_path: Path) -> None:
+     }
+ 
+ 
++def test_run_context_build_eval_context_with_event(tmp_path: Path) -> None:
++    ctx = RunContext(
++        run_id="r1",
++        inputs={"name": "Alice"},
++        step_outputs={"s1": {"key": "val"}},
++        run_dir=tmp_path,
++    )
++    event = {"decision": "approve"}
++    eval_ctx = ctx.build_eval_context(event=event)
++    assert eval_ctx["event"] == {"decision": "approve"}
++    assert eval_ctx["inputs"] == {"name": "Alice"}
++
++
++def test_run_context_build_eval_context_without_event_has_no_event_key(tmp_path: Path) -> None:
++    ctx = RunContext(run_id="r1", inputs={}, step_outputs={}, run_dir=tmp_path)
++    eval_ctx = ctx.build_eval_context()
++    assert "event" not in eval_ctx
++
++
+ def test_run_context_build_eval_context_empty(tmp_path: Path) -> None:
+     ctx = RunContext(run_id="r1", inputs={}, step_outputs={}, run_dir=tmp_path)
+     eval_ctx = ctx.build_eval_context()
+diff --git a/tests/test_persistence_store.py b/tests/test_persistence_store.py
+index f33e92e..7169493 100644
+--- a/tests/test_persistence_store.py
++++ b/tests/test_persistence_store.py
+@@ -219,6 +219,24 @@ def test_update_run_nonexistent_raises(store: Store) -> None:
+         store.update_run("fake_id", status="running")
+ 
+ 
++def test_update_run_rejects_invalid_column(store: Store) -> None:
++    run_id = store.create_run(
++        workflow_id="wf1",
++        workflow_version=None,
++        workflow_hash="abc",
++        workflow_path="/tmp/wf.yaml",
++        inputs_json="{}",
++    )
++    with pytest.raises(PersistenceError, match="Invalid column"):
++        store.update_run(run_id, bogus_column="bad")
++
++
++def test_close_is_idempotent(tmp_path: Path) -> None:
++    store = Store(base_dir=tmp_path)
++    store.close()
++    store.close()  # should not raise
++
++
+ # --- Step results ---
+ 
+ 
+diff --git a/tests/test_queries.py b/tests/test_queries.py
+index 4a453a8..b7146e8 100644
+--- a/tests/test_queries.py
++++ b/tests/test_queries.py
+@@ -2,8 +2,9 @@ from __future__ import annotations
+ 
+ from pathlib import Path
+ 
+-from checkpointflow.engine.queries import query_inspect, query_status
++from checkpointflow.engine.queries import _status_to_exit_code, query_inspect, query_status
+ from checkpointflow.engine.runner import resume_workflow, run_workflow
++from checkpointflow.models.errors import ExitCode
+ 
+ 
+ def _write_cli_end_workflow(tmp_path: Path) -> Path:
+@@ -189,3 +190,7 @@ workflow:
+     insp = query_inspect(env.run_id, base_dir=tmp_path / "store")
+     assert insp.workflow_name == "Named Workflow"
+     assert insp.workflow_description == "Has a description"
++
++
++def test_status_to_exit_code_unknown_returns_internal_error() -> None:
++    assert _status_to_exit_code("bogus_status") == ExitCode.INTERNAL_ERROR
+diff --git a/tests/test_runner.py b/tests/test_runner.py
+index 5556c59..2d9213a 100644
+--- a/tests/test_runner.py
++++ b/tests/test_runner.py
+@@ -262,3 +262,35 @@ def test_parse_input_allows_absolute_path(tmp_path: Path) -> None:
+     f.write_text('{"key": "val"}')
+     result = _parse_input(f"@{f}")
+     assert result == {"key": "val"}
++
++
++def test_run_workflow_internal_error_returns_exit_code_90(
++    tmp_path: Path, write_workflow: Callable[..., Path]
++) -> None:
++    """The catch-all except Exception handler wraps unexpected errors in ERR_INTERNAL."""
++    from unittest.mock import patch
++
++    from checkpointflow.models.errors import ExitCode
++
++    wf = write_workflow("- id: greet\n  kind: cli\n  command: echo hi")
++
++    with patch(
++        "checkpointflow.engine.runner._run_workflow_inner",
++        side_effect=RuntimeError("boom"),
++    ):
++        env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
++
++    assert env.ok is False
++    assert env.exit_code == ExitCode.INTERNAL_ERROR
++    assert env.error is not None
++    assert env.error.code == "ERR_INTERNAL"
++
++
++def test_implicit_completion_without_end_step(
++    tmp_path: Path, write_workflow: Callable[..., Path]
++) -> None:
++    """A workflow with only cli steps (no end step) completes implicitly."""
++    wf = write_workflow("    - id: greet\n      kind: cli\n      command: echo done")
++    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
++    assert env.ok is True
++    assert env.status == "completed"
+diff --git a/tests/test_step_api.py b/tests/test_step_api.py
+index dc1b7b0..a164d9f 100644
+--- a/tests/test_step_api.py
++++ b/tests/test_step_api.py
+@@ -214,3 +214,20 @@ def test_api_header_interpolation_failure(run_ctx: Callable[..., RunContext]) ->
+     assert result.success is False
+     assert "header" in (result.error_message or "").lower()
+     assert "Authorization" in (result.error_message or "")
++
++
++# --- SSRF protection ---
++
++
++def test_api_blocks_metadata_endpoint(run_ctx: Callable[..., RunContext]) -> None:
++    step = ApiStep.model_validate(
++        {
++            "id": "ssrf",
++            "kind": "api",
++            "method": "GET",
++            "url": "http://169.254.169.254/latest/meta-data/",
++        }
++    )
++    result = execute(step, run_ctx())
++    assert result.success is False
++    assert "blocked" in (result.error_message or "").lower()
+diff --git a/tests/test_step_foreach.py b/tests/test_step_foreach.py
+index 89344ab..a041709 100644
+--- a/tests/test_step_foreach.py
++++ b/tests/test_step_foreach.py
+@@ -1,11 +1,8 @@
+ from __future__ import annotations
+ 
+-import platform
+ from collections.abc import Callable
+ from pathlib import Path
+ 
+-import pytest
+-
+ from checkpointflow.engine.steps.foreach_step import execute
+ from checkpointflow.models.state import RunContext
+ from checkpointflow.models.workflow import ForeachStep
+@@ -217,9 +214,10 @@ def test_foreach_body_with_api_step(run_ctx: Callable[..., RunContext]) -> None:
+     assert result.error_message is not None
+ 
+ 
+-@pytest.mark.skipif(platform.system() != "Windows", reason="echo syntax is platform-specific")
+ def test_foreach_body_with_nested_foreach(run_ctx: Callable[..., RunContext]) -> None:
+     """A foreach body can contain another foreach step."""
++    import sys
++
+     step = ForeachStep.model_validate(
+         {
+             "id": "outer",
+@@ -234,7 +232,7 @@ def test_foreach_body_with_nested_foreach(run_ctx: Callable[..., RunContext]) ->
+                         {
+                             "id": "echo",
+                             "kind": "cli",
+-                            "command": "echo ${item}",
++                            "command": f"{sys.executable} -c \"print('${{item}}')\"",
+                         },
+                     ],
+                 },
+diff --git a/tests/test_step_parallel.py b/tests/test_step_parallel.py
+index c92045d..b606cc9 100644
+--- a/tests/test_step_parallel.py
++++ b/tests/test_step_parallel.py
+@@ -127,6 +127,49 @@ def test_parallel_with_await_event_branch_returns_error(
+     assert "not supported" in result.error_message
+ 
+ 
++def test_parallel_all_branches_fail(run_ctx: Callable[..., RunContext]) -> None:
++    step = ParallelStep.model_validate(
++        {
++            "id": "par",
++            "kind": "parallel",
++            "branches": [
++                {"start_at": "fail_a"},
++                {"start_at": "fail_b"},
++            ],
++        }
++    )
++    workflow_steps = [
++        _make_cli_step("fail_a", "exit 1", shell="bash"),
++        _make_cli_step("fail_b", "exit 1", shell="bash"),
++    ]
++    result = execute(step, run_ctx(), workflow_steps=workflow_steps)
++    assert result.success is False
++    assert result.error_message is not None
++
++
++def test_parallel_three_branches(run_ctx: Callable[..., RunContext]) -> None:
++    step = ParallelStep.model_validate(
++        {
++            "id": "par",
++            "kind": "parallel",
++            "branches": [
++                {"start_at": "a"},
++                {"start_at": "b"},
++                {"start_at": "c"},
++            ],
++        }
++    )
++    workflow_steps = [
++        _make_cli_step("a", 'echo \'{"from": "a"}\'', shell="bash"),
++        _make_cli_step("b", 'echo \'{"from": "b"}\'', shell="bash"),
++        _make_cli_step("c", 'echo \'{"from": "c"}\'', shell="bash"),
++    ]
++    result = execute(step, run_ctx(), workflow_steps=workflow_steps)
++    assert result.success is True
++    assert result.outputs is not None
++    assert len(result.outputs) == 3
++
++
+ def test_parallel_with_api_step_branch(run_ctx: Callable[..., RunContext]) -> None:
+     step = ParallelStep.model_validate(
+         {
+diff --git a/tests/test_step_switch.py b/tests/test_step_switch.py
+index 704699d..b2c3145 100644
+--- a/tests/test_step_switch.py
++++ b/tests/test_step_switch.py
+@@ -1,7 +1,11 @@
+ from __future__ import annotations
+ 
++import json
++import sys
+ from collections.abc import Callable
++from pathlib import Path
+ 
++from checkpointflow.engine.runner import run_workflow
+ from checkpointflow.engine.steps.switch_step import execute
+ from checkpointflow.models.state import RunContext
+ from checkpointflow.models.workflow import SwitchStep
+@@ -71,6 +75,63 @@ def test_switch_fails_when_no_case_and_no_default(run_ctx: Callable[..., RunCont
+     assert "No case matched" in result.error_message
+ 
+ 
++def test_switch_deep_chain_no_recursion_error(tmp_path: Path) -> None:
++    """Ensure a long chain of switch steps doesn't hit Python's recursion limit."""
++    # Build a chain of N switch steps where each jumps to the next.
++    # With recursion, N > recursion limit would crash.
++    n = sys.getrecursionlimit() + 50
++    steps: list[dict[str, object]] = []
++    for i in range(n):
++        next_id = f"switch_{i + 1}" if i < n - 1 else "done"
++        steps.append(
++            {
++                "id": f"switch_{i}",
++                "kind": "switch",
++                "cases": [{"when": 'inputs.go == "yes"', "next": next_id}],
++            }
++        )
++    steps.append({"id": "done", "kind": "end", "result": {"status": "ok"}})
++
++    workflow = {
++        "schema_version": "checkpointflow/v1",
++        "workflow": {
++            "id": "deep_switch",
++            "version": "1.0",
++            "inputs": {"type": "object", "properties": {"go": {"type": "string"}}},
++            "steps": steps,
++        },
++    }
++    import yaml
++
++    wf_path = tmp_path / "deep_switch.yaml"
++    wf_path.write_text(yaml.dump(workflow), encoding="utf-8")
++
++    envelope = run_workflow(wf_path, json.dumps({"go": "yes"}), base_dir=tmp_path)
++    assert envelope.ok is True
++    assert envelope.status == "completed"
++    assert envelope.result == {"status": "ok"}
++
++
++def test_switch_malformed_condition_surfaces_in_error(run_ctx: Callable[..., RunContext]) -> None:
++    """When a case has a malformed condition and no case matches, the error message explains why."""
++    step = SwitchStep.model_validate(
++        {
++            "id": "branch",
++            "kind": "switch",
++            "cases": [
++                {"when": "!!!invalid expression!!!", "next": "broken_path"},
++            ],
++        }
++    )
++    result = execute(step, run_ctx(inputs={"mode": "test"}))
++    assert result.success is False
++    assert result.error_message is not None
++    assert (
++        "evaluation error" in result.error_message.lower()
++        or "invalid" in result.error_message.lower()
++    )
++
++
+ def test_switch_uses_step_outputs_in_condition(run_ctx: Callable[..., RunContext]) -> None:
+     step = SwitchStep.model_validate(
+         {

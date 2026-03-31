@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +27,10 @@ from checkpointflow.models.workflow import (
     WorkflowDocument,
     find_duplicate_step_ids,
 )
-from checkpointflow.persistence.store import PersistenceError, Store
+from checkpointflow.persistence.store import PersistenceError, RunRecord, Store
 from checkpointflow.schema import validate_workflow_document
+
+logger = logging.getLogger(__name__)
 
 
 class RunError(Exception):
@@ -67,19 +69,69 @@ def _build_wait_detail(
     )
 
 
-def _build_eval_context(
-    inputs: dict[str, Any],
-    step_outputs: dict[str, dict[str, Any]],
-    event: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build evaluation context for expressions."""
-    ctx: dict[str, Any] = {
-        "inputs": inputs,
-        "steps": {sid: {"outputs": outs} for sid, outs in step_outputs.items()},
-    }
-    if event is not None:
-        ctx["event"] = event
-    return ctx
+def _handle_await_event(
+    step: AwaitEventStep,
+    ctx: RunContext,
+    store: Store,
+    run_id: str,
+    command: str,
+    wf_meta: dict[str, Any],
+) -> Envelope:
+    """Persist waiting state and return a waiting envelope."""
+    store.update_run(
+        run_id,
+        status="waiting",
+        current_step_id=step.id,
+        expected_event_name=step.event_name,
+        expected_event_schema=json.dumps(step.input_schema),
+    )
+    wait_detail = _build_wait_detail(step, run_id, eval_ctx=ctx.build_eval_context())
+    return Envelope.success(
+        command=command,
+        status="waiting",
+        exit_code=ExitCode.WAITING,
+        run_id=run_id,
+        **wf_meta,
+        current_step_id=step.id,
+        wait=wait_detail,
+    )
+
+
+def _handle_end_step(
+    result: Any,
+    store: Store,
+    run_id: str,
+    step_id: str,
+    command: str,
+    wf_meta: dict[str, Any],
+) -> Envelope:
+    """Persist completion and return a completed envelope."""
+    final_result = result.outputs if result.outputs else {}
+    store.update_run(
+        run_id,
+        status="completed",
+        result_json=json.dumps(final_result),
+    )
+    return Envelope.success(
+        command=command,
+        run_id=run_id,
+        **wf_meta,
+        current_step_id=step_id,
+        result=final_result if final_result else None,
+    )
+
+
+def resolve_switch_jump(
+    result_outputs: dict[str, Any],
+    all_steps: list[Any],
+    step_ids: list[str],
+) -> tuple[list[Any], int] | None:
+    """Resolve a SwitchStep jump target. Returns (remaining_steps, target_idx) or None."""
+    next_step_id = result_outputs.get("_next_step_id")
+    if next_step_id and next_step_id in step_ids:
+        target_idx = step_ids.index(next_step_id)
+        return list(all_steps[target_idx:]), target_idx
+    return None
 
 
 def _execute_steps(
@@ -108,10 +160,18 @@ def _execute_steps(
         step = steps[idx]
         order = start_order + idx
 
+        ctx = RunContext(
+            run_id=run_id,
+            inputs=inputs,
+            step_outputs=step_outputs,
+            run_dir=run_dir,
+            defaults=workflow.defaults or {},
+        )
+
         # Check if condition
         if step.step_if:
             condition = strip_expression_wrapper(step.step_if)
-            eval_ctx = _build_eval_context(inputs, step_outputs)
+            eval_ctx = ctx.build_eval_context()
             try:
                 if not evaluate_condition(condition, eval_ctx):
                     idx += 1
@@ -129,16 +189,10 @@ def _execute_steps(
                 )
 
         # Update run status
-        with contextlib.suppress(PersistenceError):
+        try:
             store.update_run(run_id, status="running", current_step_id=step.id)
-
-        ctx = RunContext(
-            run_id=run_id,
-            inputs=inputs,
-            step_outputs=step_outputs,
-            run_dir=run_dir,
-            defaults=workflow.defaults or {},
-        )
+        except PersistenceError:
+            logger.warning("Failed to update run %s status to running", run_id)
 
         # Dispatch step handler
         result = dispatch_step(step, ctx, workflow_steps=all_steps)
@@ -178,58 +232,20 @@ def _execute_steps(
 
         # AwaitEventStep: halt and return waiting envelope
         if isinstance(step, AwaitEventStep):
-            store.update_run(
-                run_id,
-                status="waiting",
-                current_step_id=step.id,
-                expected_event_name=step.event_name,
-                expected_event_schema=json.dumps(step.input_schema),
-            )
-            wait_eval_ctx = _build_eval_context(inputs, step_outputs)
-            wait_detail = _build_wait_detail(step, run_id, eval_ctx=wait_eval_ctx)
-            return Envelope.success(
-                command=command,
-                status="waiting",
-                exit_code=ExitCode.WAITING,
-                run_id=run_id,
-                **wf_meta,
-                current_step_id=step.id,
-                wait=wait_detail,
-            )
+            return _handle_await_event(step, ctx, store, run_id, command, wf_meta)
 
         # EndStep: terminate workflow
         if isinstance(step, EndStep):
-            final_result = result.outputs if result.outputs else {}
-            store.update_run(
-                run_id,
-                status="completed",
-                result_json=json.dumps(final_result),
-            )
-            return Envelope.success(
-                command=command,
-                run_id=run_id,
-                **wf_meta,
-                current_step_id=step.id,
-                result=final_result if final_result else None,
-            )
+            return _handle_end_step(result, store, run_id, step.id, command, wf_meta)
 
-        # SwitchStep: jump to the target step
+        # SwitchStep: jump to the target step (iterative, not recursive)
         if isinstance(step, SwitchStep) and result.outputs:
-            next_step_id = result.outputs.get("_next_step_id")
-            if next_step_id and next_step_id in step_ids:
-                target_idx = step_ids.index(next_step_id)
-                remaining = list(all_steps[target_idx:])
-                return _execute_steps(
-                    workflow,
-                    store,
-                    run_id,
-                    run_dir,
-                    inputs,
-                    step_outputs,
-                    remaining,
-                    order + 1,
-                    command,
-                )
+            jump = resolve_switch_jump(result.outputs, all_steps, step_ids)
+            if jump is not None:
+                steps, _ = jump
+                start_order = order + 1
+                idx = 0
+                continue
 
         idx += 1
 
@@ -353,21 +369,22 @@ def _run_workflow_inner(
             exit_code=ExitCode.PERSISTENCE_ERROR,
         )
 
-    workflow_hash = hashlib.sha256(raw_text.encode()).hexdigest()
-    run_id = store.create_run(
-        workflow_id=workflow.id,
-        workflow_name=workflow.name,
-        workflow_description=workflow.description,
-        workflow_version=workflow.version,
-        workflow_hash=workflow_hash,
-        workflow_path=str(workflow_path.resolve()),
-        inputs_json=json.dumps(inputs),
-    )
+    with store:
+        workflow_hash = hashlib.sha256(raw_text.encode()).hexdigest()
+        run_id = store.create_run(
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            workflow_description=workflow.description,
+            workflow_version=workflow.version,
+            workflow_hash=workflow_hash,
+            workflow_path=str(workflow_path.resolve()),
+            inputs_json=json.dumps(inputs),
+        )
 
-    run_dir = store.run_dir(run_id)
-    return _execute_steps(
-        workflow, store, run_id, run_dir, inputs, {}, list(workflow.steps), 0, "run"
-    )
+        run_dir = store.run_dir(run_id)
+        return _execute_steps(
+            workflow, store, run_id, run_dir, inputs, {}, list(workflow.steps), 0, "run"
+        )
 
 
 # --- resume_workflow ---
@@ -401,9 +418,19 @@ def _resume_workflow_inner(
     base_dir: Path | None = None,
 ) -> Envelope:
     store = Store(base_dir=base_dir)
+    with store:
+        return _resume_inner_with_store(store, run_id, event_name, event_input_raw)
+
+
+def _validate_resume(
+    store: Store,
+    run_id: str,
+    event_name: str,
+    event_input_raw: str,
+) -> Envelope | tuple[RunRecord, dict[str, Any]]:
+    """Validate all resume preconditions. Returns error Envelope or (run, event_data)."""
     run = store.get_run(run_id)
 
-    # Verify run exists
     if run is None:
         return Envelope.failure(
             command="resume",
@@ -412,7 +439,6 @@ def _resume_workflow_inner(
             exit_code=ExitCode.VALIDATION_ERROR,
         )
 
-    # Verify waiting state
     if run["status"] != "waiting":
         return Envelope.failure(
             command="resume",
@@ -422,7 +448,6 @@ def _resume_workflow_inner(
             run_id=run_id,
         )
 
-    # Verify event name
     if event_name != run["expected_event_name"]:
         return Envelope.failure(
             command="resume",
@@ -432,7 +457,6 @@ def _resume_workflow_inner(
             run_id=run_id,
         )
 
-    # Parse event input
     try:
         event_data = _parse_input(event_input_raw)
     except FileNotFoundError as exc:
@@ -452,7 +476,7 @@ def _resume_workflow_inner(
             run_id=run_id,
         )
 
-    # Validate event against schema
+    assert run["expected_event_schema"] is not None
     expected_schema = json.loads(run["expected_event_schema"])
     event_validator = Draft202012Validator(expected_schema)
     event_errors = [e.message for e in event_validator.iter_errors(event_data)]
@@ -465,6 +489,20 @@ def _resume_workflow_inner(
             run_id=run_id,
             details=event_errors,
         )
+
+    return run, event_data
+
+
+def _resume_inner_with_store(
+    store: Store,
+    run_id: str,
+    event_name: str,
+    event_input_raw: str,
+) -> Envelope:
+    validated = _validate_resume(store, run_id, event_name, event_input_raw)
+    if isinstance(validated, Envelope):
+        return validated
+    run, event_data = validated
 
     # Record event
     store.insert_event(
@@ -499,10 +537,11 @@ def _resume_workflow_inner(
     doc = WorkflowDocument.model_validate(yaml.safe_load(raw_text))
     workflow = doc.workflow
 
-    # Restore state
+    # Restore state — current_step_id is always set for waiting runs
     inputs: dict[str, Any] = json.loads(run["inputs_json"])
     step_outputs: dict[str, dict[str, Any]] = json.loads(run["step_outputs_json"])
     current_step_id = run["current_step_id"]
+    assert current_step_id is not None
 
     # Store event data as the await_event step's outputs
     step_outputs[current_step_id] = event_data
@@ -515,7 +554,13 @@ def _resume_workflow_inner(
     # Evaluate transitions
     next_step_id: str | None = None
     if isinstance(await_step, AwaitEventStep) and await_step.transitions:
-        eval_ctx = _build_eval_context(inputs, step_outputs, event=event_data)
+        resume_ctx = RunContext(
+            run_id=run_id,
+            inputs=inputs,
+            step_outputs=step_outputs,
+            run_dir=store.run_dir(run_id),
+        )
+        eval_ctx = resume_ctx.build_eval_context(event=event_data)
         for transition in await_step.transitions:
             condition = strip_expression_wrapper(transition.when)
             try:
@@ -575,8 +620,3 @@ def _resume_workflow_inner(
         start_order,
         "resume",
     )
-
-
-# Re-export lifecycle operations for backward compatibility
-from checkpointflow.engine.lifecycle import cancel_run as cancel_run  # noqa: E402
-from checkpointflow.engine.lifecycle import delete_run as delete_run  # noqa: E402

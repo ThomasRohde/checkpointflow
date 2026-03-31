@@ -219,6 +219,24 @@ def test_update_run_nonexistent_raises(store: Store) -> None:
         store.update_run("fake_id", status="running")
 
 
+def test_update_run_rejects_invalid_column(store: Store) -> None:
+    run_id = store.create_run(
+        workflow_id="wf1",
+        workflow_version=None,
+        workflow_hash="abc",
+        workflow_path="/tmp/wf.yaml",
+        inputs_json="{}",
+    )
+    with pytest.raises(PersistenceError, match="Invalid column"):
+        store.update_run(run_id, bogus_column="bad")
+
+
+def test_close_is_idempotent(tmp_path: Path) -> None:
+    store = Store(base_dir=tmp_path)
+    store.close()
+    store.close()  # should not raise
+
+
 # --- Step results ---
 
 

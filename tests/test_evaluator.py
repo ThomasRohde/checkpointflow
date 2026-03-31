@@ -6,6 +6,7 @@ import pytest
 
 from checkpointflow.engine.evaluator import (
     EvaluatorError,
+    _parse_literal,
     evaluate_condition,
     interpolate,
     interpolate_values,
@@ -132,6 +133,40 @@ def test_evaluate_condition_and_false(ctx: dict[str, Any]) -> None:
 
 def test_evaluate_condition_or(ctx: dict[str, Any]) -> None:
     assert evaluate_condition('inputs.page_id == "999" or inputs.page_id == "123"', ctx) is True
+
+
+def test_evaluate_condition_int_comparison(ctx: dict[str, Any]) -> None:
+    assert evaluate_condition("inputs.count == 42", ctx) is True
+
+
+def test_evaluate_condition_int_mismatch(ctx: dict[str, Any]) -> None:
+    assert evaluate_condition("inputs.count == 99", ctx) is False
+
+
+def test_evaluate_condition_mixed_type_string_vs_int(ctx: dict[str, Any]) -> None:
+    # count is int 42, comparing against string "42" — type coercion should match
+    assert evaluate_condition('inputs.count == "42"', ctx) is True
+
+
+# --- _parse_literal ---
+
+
+def test_parse_literal_int() -> None:
+    assert _parse_literal("42") == 42
+    assert isinstance(_parse_literal("42"), int)
+
+
+def test_parse_literal_float() -> None:
+    assert _parse_literal("3.14") == 3.14
+    assert isinstance(_parse_literal("3.14"), float)
+
+
+def test_parse_literal_null() -> None:
+    assert _parse_literal("null") is None
+
+
+def test_parse_literal_bare_token() -> None:
+    assert _parse_literal("hello") == "hello"
 
 
 # --- strip_expression_wrapper ---

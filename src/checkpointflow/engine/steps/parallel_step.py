@@ -67,7 +67,18 @@ def execute(
 
     with ThreadPoolExecutor(max_workers=len(branch_steps)) as executor:
         futures = {
-            executor.submit(_run_branch, bstep, ctx, workflow_steps=workflow_steps): step_id
+            executor.submit(
+                _run_branch,
+                bstep,
+                RunContext(
+                    run_id=ctx.run_id,
+                    inputs=ctx.inputs,
+                    step_outputs=dict(ctx.step_outputs),
+                    run_dir=ctx.run_dir,
+                    defaults=ctx.defaults,
+                ),
+                workflow_steps=workflow_steps,
+            ): step_id
             for step_id, bstep in branch_steps
         }
         for future in as_completed(futures):

@@ -67,6 +67,7 @@ jobs:
           - ubuntu-latest
           - windows-latest
         python-version:
+          - "3.11"
           - "3.13"
           - "3.14"
 

@@ -1,0 +1,89 @@
+{
+  "persona": "architecture",
+  "verdict": "approve",
+  "summary": "The checkpointflow codebase demonstrates a well-structured, layered architecture with clean unidirectional dependency flow (models <- persistence <- engine <- cli/gui), no circular imports, and a disciplined step-dispatch pattern that makes adding new step kinds straightforward. For a Phase 1 greenfield project, the architectural foundations are solid -- Pydantic discriminated unions for step types, a uniform Envelope response contract, and consistent base_dir threading for state isolation are all excellent design choices. Several medium-severity findings around the untyped Store interface, duplicated execution logic in workflow_ref_step, and tightly-coupled flow-control post-dispatch represent natural Phase 2 improvements rather than blocking issues.",
+  "blocking_count": 0,
+  "finding_count": 8,
+  "findings": [
+    {
+      "severity": "medium",
+      "blocking": false,
+      "category": "abstraction-leakage",
+      "title": "Persistence store returns untyped dicts instead of domain objects",
+      "description": "Store.get_run() returns dict[str, Any] (from sqlite3.Row), which forces callers throughout runner.py, queries.py, lifecycle.py, and gui/api.py to access run data via string keys like run['status'], run['workflow_path'], run['expected_event_schema']. This creates implicit coupling between the SQL column layout and every consumer, makes key typos invisible to the type checker, and means any schema migration requires auditing every call site across four modules. The persistence layer does not fully encapsulate its storage format.",
+      "file": "src/checkpointflow/persistence/store.py",
+      "line": 144,
+      "recommendation": "Introduce a RunRecord TypedDict (or dataclass) in the models layer that Store maps rows into before returning. This gives type-safe attribute access, makes the contract explicit, and decouples consumers from the SQL column names. A TypedDict is the minimal change; a proper dataclass with computed properties is the ideal."
+    },
+    {
+      "severity": "medium",
+      "blocking": false,
+      "category": "duplication",
+      "title": "Step execution loop duplicated between runner._execute_steps and workflow_ref_step.execute",
+      "description": "The core step-execution loop (iterate steps, check if-conditions, dispatch, handle SwitchStep jumps, handle EndStep termination) is implemented twice: once in runner.py _execute_steps() and again in workflow_ref_step.py execute(). The workflow_ref_step version is a simplified copy that lacks if-condition evaluation, persistence of step results, and output-schema validation. This means bug fixes or new capabilities added to the main loop (such as a new flow-control step kind) may silently fail to propagate to sub-workflow execution.",
+      "file": "src/checkpointflow/engine/steps/workflow_ref_step.py",
+      "line": 64,
+      "recommendation": "Extract a shared step-execution function that both the top-level runner and sub-workflow step can call, parameterized by whether to persist results (optional Store). This would also allow foreach_step body execution to reuse the same loop."
+    },
+    {
+      "severity": "medium",
+      "blocking": false,
+      "category": "coupling",
+      "title": "Runner has hard-coded post-dispatch knowledge of AwaitEventStep and SwitchStep",
+      "description": "After dispatch_step returns in _execute_steps, the runner checks isinstance(step, AwaitEventStep) to halt-and-wait and isinstance(step, SwitchStep) to jump to a target step. This means the runner has intimate knowledge of specific step kinds, violating the Open/Closed principle. Adding a new flow-control step kind (e.g., retry, goto, or a conditional loop) requires modifying the runner loop rather than just adding a new step handler.",
+      "file": "src/checkpointflow/engine/runner.py",
+      "line": 165,
+      "recommendation": "Encode flow-control directives in StepResult itself (e.g., a 'directive' field with values like 'halt_waiting', 'jump_to:<step_id>', 'terminate'). The runner loop would then react to generic directives rather than type-checking step classes. Acceptable for Phase 1 since the set of flow-control steps is small and stable."
+    },
+    {
+      "severity": "medium",
+      "blocking": false,
+      "category": "concurrency",
+      "title": "Parallel branches share mutable RunContext.step_outputs without isolation",
+      "description": "In parallel_step.py, all branches receive the same RunContext with a shared step_outputs dict reference. Although current branch handlers only read from step_outputs, any future branch that writes to it (e.g., a sub-workflow composing outputs back) would produce a data race under ThreadPoolExecutor. The shared mutable state is an accident waiting to happen.",
+      "file": "src/checkpointflow/engine/steps/parallel_step.py",
+      "line": 68,
+      "recommendation": "Pass each branch a shallow copy of step_outputs (dict.copy()) to ensure isolation. Merged outputs are already collected safely via the futures pattern. This is a trivial, defensive change."
+    },
+    {
+      "severity": "low",
+      "blocking": false,
+      "category": "interface-stability",
+      "title": "Store.update_run uses **kwargs with runtime column validation instead of explicit parameters",
+      "description": "update_run(run_id, **kwargs) validates column names at runtime against a frozenset whitelist (_UPDATABLE_COLUMNS). Callers can pass any keyword and typos only surface as PersistenceError at runtime, not as type errors during static analysis. Combined with the dict return type, the entire persistence contract is stringly-typed.",
+      "file": "src/checkpointflow/persistence/store.py",
+      "line": 160,
+      "recommendation": "For Phase 2, switch to explicit keyword-only parameters (status: str | None = None, current_step_id: str | None = None, etc.) or a dedicated UpdateFields dataclass. This makes the API self-documenting and type-checkable under mypy strict."
+    },
+    {
+      "severity": "low",
+      "blocking": false,
+      "category": "separation-of-concerns",
+      "title": "query_status re-reads workflow YAML to reconstruct wait details",
+      "description": "query_status() in queries.py loads and parses the workflow YAML file to extract prompt, audience, summary, and risk_level for waiting runs, because these fields are not persisted in the runs table. This creates a runtime dependency on the workflow file still existing and being unchanged, and silently degrades to defaults if the file is missing.",
+      "file": "src/checkpointflow/engine/queries.py",
+      "line": 58,
+      "recommendation": "Persist the WaitDetail fields (or a serialized WaitDetail JSON) in the runs table when transitioning to 'waiting' status, so query_status can reconstruct the full envelope purely from persisted state."
+    },
+    {
+      "severity": "low",
+      "blocking": false,
+      "category": "extension-model",
+      "title": "Step handler signature inconsistency for parallel_step",
+      "description": "Seven of eight step handlers follow the signature execute(step, ctx) -> StepResult. ParallelStep requires an extra keyword argument 'workflow_steps', forcing dispatch_step to special-case it. This prevents defining a uniform StepHandler protocol and makes the dispatch less uniform.",
+      "file": "src/checkpointflow/engine/steps/parallel_step.py",
+      "line": 41,
+      "recommendation": "Add workflow_steps to RunContext (or a broader ExecutionContext wrapping RunContext) so all handlers access it uniformly. This also benefits foreach_step.py which currently receives workflow_steps through its body-step dispatch calls."
+    },
+    {
+      "severity": "low",
+      "blocking": false,
+      "category": "error-handling",
+      "title": "PersistenceError silently suppressed during step execution status update",
+      "description": "In _execute_steps(), the status update to 'running' uses contextlib.suppress(PersistenceError). If the database is corrupt or the run was externally deleted mid-execution, the error is swallowed and the step proceeds, potentially writing step results to a non-existent run.",
+      "file": "src/checkpointflow/engine/runner.py",
+      "line": 125,
+      "recommendation": "At minimum, log or emit a warning when the status update fails. Consider failing fast if the underlying error indicates the run no longer exists, to avoid orphaned step results."
+    }
+  ]
+}

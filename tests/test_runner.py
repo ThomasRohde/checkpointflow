@@ -262,3 +262,35 @@ def test_parse_input_allows_absolute_path(tmp_path: Path) -> None:
     f.write_text('{"key": "val"}')
     result = _parse_input(f"@{f}")
     assert result == {"key": "val"}
+
+
+def test_run_workflow_internal_error_returns_exit_code_90(
+    tmp_path: Path, write_workflow: Callable[..., Path]
+) -> None:
+    """The catch-all except Exception handler wraps unexpected errors in ERR_INTERNAL."""
+    from unittest.mock import patch
+
+    from checkpointflow.models.errors import ExitCode
+
+    wf = write_workflow("- id: greet\n  kind: cli\n  command: echo hi")
+
+    with patch(
+        "checkpointflow.engine.runner._run_workflow_inner",
+        side_effect=RuntimeError("boom"),
+    ):
+        env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+
+    assert env.ok is False
+    assert env.exit_code == ExitCode.INTERNAL_ERROR
+    assert env.error is not None
+    assert env.error.code == "ERR_INTERNAL"
+
+
+def test_implicit_completion_without_end_step(
+    tmp_path: Path, write_workflow: Callable[..., Path]
+) -> None:
+    """A workflow with only cli steps (no end step) completes implicitly."""
+    wf = write_workflow("    - id: greet\n      kind: cli\n      command: echo done")
+    env = run_workflow(wf, "{}", base_dir=tmp_path / "store")
+    assert env.ok is True
+    assert env.status == "completed"

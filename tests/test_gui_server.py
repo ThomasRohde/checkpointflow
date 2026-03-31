@@ -23,8 +23,8 @@ def store(base_dir: Path) -> Store:
 
 @pytest.fixture()
 def client(base_dir: Path) -> TestClient:
-    app = create_app(base_dir=base_dir)
-    return TestClient(app)
+    app, token = create_app(base_dir=base_dir)
+    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
 
 
 def _make_completed_run(store: Store) -> str:
@@ -106,6 +106,33 @@ def test_api_step_stream_invalid(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
+def test_api_step_stream_path_traversal_run_id(client: TestClient, store: Store) -> None:
+    """Verify _safe_path_component rejects '..' in run_id."""
+    from checkpointflow.gui.api import get_step_output
+
+    result = get_step_output(store, "../etc", "s1", "stdout")
+    assert result is None
+
+
+def test_api_step_stream_path_traversal_step_id(client: TestClient, store: Store) -> None:
+    """Verify _safe_path_component rejects '..' in step_id."""
+    from checkpointflow.gui.api import get_step_output
+
+    result = get_step_output(store, "valid_id", "../etc/passwd", "stdout")
+    assert result is None
+
+
+def test_api_step_stream_stdout_success(client: TestClient, store: Store, base_dir: Path) -> None:
+    run_id = _make_completed_run(store)
+    # Write a fake stdout file
+    stdout_dir = base_dir / "runs" / run_id / "stdout"
+    stdout_dir.mkdir(parents=True, exist_ok=True)
+    (stdout_dir / "step1.txt").write_text("hello world", encoding="utf-8")
+    resp = client.get(f"/api/runs/{run_id}/steps/step1/stdout")
+    assert resp.status_code == 200
+    assert resp.text == "hello world"
+
+
 # --- /api/workflows ---
 
 
@@ -125,9 +152,69 @@ def test_security_headers_present(client: TestClient) -> None:
     assert "default-src" in resp.headers["content-security-policy"]
 
 
+# --- Auth token ---
+
+
+def test_api_rejects_request_without_token(base_dir: Path) -> None:
+    app, _token = create_app(base_dir=base_dir)
+    client = TestClient(app)
+    resp = client.get("/api/runs", headers={})
+    assert resp.status_code == 401
+
+
+def test_api_accepts_bearer_token(base_dir: Path) -> None:
+    app, token = create_app(base_dir=base_dir)
+    client = TestClient(app)
+    resp = client.get("/api/runs", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+
+def test_api_accepts_query_param_token(base_dir: Path) -> None:
+    app, token = create_app(base_dir=base_dir)
+    client = TestClient(app)
+    resp = client.get(f"/api/runs?token={token}")
+    assert resp.status_code == 200
+
+
+def test_api_rejects_wrong_token(base_dir: Path) -> None:
+    app, _token = create_app(base_dir=base_dir)
+    client = TestClient(app)
+    resp = client.get("/api/runs", headers={"Authorization": "Bearer wrong"})
+    assert resp.status_code == 401
+
+
+def test_static_routes_skip_auth(base_dir: Path) -> None:
+    app, _token = create_app(base_dir=base_dir)
+    client = TestClient(app)
+    # SPA fallback should not require auth
+    resp = client.get("/some/random/path")
+    assert resp.status_code in (200, 503)
+
+
 # --- SPA fallback ---
 
 
 def test_spa_fallback(client: TestClient) -> None:
     resp = client.get("/some/random/path")
     assert resp.status_code in (200, 503)
+
+
+# --- CORS ---
+
+
+def test_cors_preflight_returns_headers(base_dir: Path) -> None:
+    app, token = create_app(base_dir=base_dir)
+    client = TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    resp = client.options(
+        "/api/runs",
+        headers={"Origin": "http://localhost:8420", "Access-Control-Request-Method": "GET"},
+    )
+    assert resp.status_code == 204
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:8420"
+
+
+def test_cors_rejects_non_localhost_origin(base_dir: Path) -> None:
+    app, token = create_app(base_dir=base_dir)
+    client = TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    resp = client.get("/api/runs", headers={"Origin": "http://evil.com"})
+    assert "access-control-allow-origin" not in resp.headers
