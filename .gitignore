@@ -8,7 +8,8 @@ __pycache__/
 htmlcov/
 dist/
 build/
-.checkpointflow/
+.checkpointflow/runs/
+.checkpointflow/runs.db
 gui/node_modules/
 gui/dist/
 screenshots/
