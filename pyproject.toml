@@ -1,6 +1,6 @@
 [project]
 name = "checkpointflow"
-version = "1.9.2"
+version = "1.9.3"
 description = "CLI toolchain for authoring and running deterministic, resumable agent workflows."
 readme = "README.md"
 license = { text = "MIT" }
