@@ -15,30 +15,16 @@ from checkpointflow.engine.evaluator import (
     strip_expression_wrapper,
 )
 from checkpointflow.engine.loader import parse_input as _parse_input
-from checkpointflow.engine.steps import (
-    api_step,
-    await_event_step,
-    cli_step,
-    end_step,
-    foreach_step,
-    parallel_step,
-    switch_step,
-    workflow_ref_step,
-)
+from checkpointflow.engine.steps.dispatch import dispatch_step
 from checkpointflow.models.envelope import Envelope, WaitDetail, WaitResume
 from checkpointflow.models.errors import ErrorCode, ExitCode
 from checkpointflow.models.state import RunContext
 from checkpointflow.models.workflow import (
-    ApiStep,
     AwaitEventStep,
-    CliStep,
     EndStep,
-    ForeachStep,
-    ParallelStep,
     SwitchStep,
     Workflow,
     WorkflowDocument,
-    WorkflowRefStep,
     find_duplicate_step_ids,
 )
 from checkpointflow.persistence.store import PersistenceError, Store
@@ -155,32 +141,7 @@ def _execute_steps(
         )
 
         # Dispatch step handler
-        if isinstance(step, CliStep):
-            result = cli_step.execute(step, ctx)
-        elif isinstance(step, EndStep):
-            result = end_step.execute(step, ctx)
-        elif isinstance(step, AwaitEventStep):
-            result = await_event_step.execute(step, ctx)
-        elif isinstance(step, ApiStep):
-            result = api_step.execute(step, ctx)
-        elif isinstance(step, SwitchStep):
-            result = switch_step.execute(step, ctx)
-        elif isinstance(step, ForeachStep):
-            result = foreach_step.execute(step, ctx)
-        elif isinstance(step, ParallelStep):
-            result = parallel_step.execute(step, ctx, workflow_steps=all_steps)
-        elif isinstance(step, WorkflowRefStep):
-            result = workflow_ref_step.execute(step, ctx)
-        else:
-            store.update_run(run_id, status="failed")
-            return Envelope.failure(
-                command=command,
-                error_code=ErrorCode.ERR_UNSUPPORTED_STEP,
-                message=f"Step kind '{step.kind}' is not supported in this version.",
-                exit_code=ExitCode.UNSUPPORTED,
-                run_id=run_id,
-                **wf_meta,
-            )
+        result = dispatch_step(step, ctx, workflow_steps=all_steps)
 
         # Persist step result
         store.insert_step_result(

@@ -33,6 +33,35 @@ def test_store_idempotent_init(tmp_path: Path) -> None:
     Store(base_dir=tmp_path)  # should not raise
 
 
+# --- context manager ---
+
+
+def test_store_context_manager_returns_self(tmp_path: Path) -> None:
+    with Store(base_dir=tmp_path) as store:
+        assert isinstance(store, Store)
+
+
+def test_store_context_manager_closes_on_exit(tmp_path: Path) -> None:
+    with Store(base_dir=tmp_path) as store:
+        store.create_run(
+            workflow_id="wf1",
+            workflow_version="1.0",
+            workflow_hash="abc",
+            workflow_path="/tmp/wf.yaml",
+            inputs_json="{}",
+        )
+    # Connection should be closed — operations should raise
+    with pytest.raises(Exception):  # noqa: B017
+        store._conn.execute("SELECT 1")
+
+
+def test_store_context_manager_closes_on_exception(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError), Store(base_dir=tmp_path) as store:
+        raise RuntimeError("test")
+    with pytest.raises(Exception):  # noqa: B017
+        store._conn.execute("SELECT 1")
+
+
 # --- list_runs ---
 
 

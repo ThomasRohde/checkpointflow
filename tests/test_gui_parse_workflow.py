@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from checkpointflow.gui.api import parse_workflow
 
 CLI_WORKFLOW = """\
@@ -44,6 +46,18 @@ def test_parse_workflow_invalid_yaml_returns_none(tmp_path: Path) -> None:
     f = tmp_path / "bad.yaml"
     f.write_text("not: valid: workflow: - [")
     assert parse_workflow(str(f)) is None
+
+
+def test_parse_workflow_invalid_logs_to_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    f = tmp_path / "bad.yaml"
+    f.write_text("not: valid: workflow: - [")
+    result = parse_workflow(str(f))
+    assert result is None
+    captured = capsys.readouterr()
+    assert "Warning" in captured.err
+    assert "bad.yaml" in captured.err
 
 
 def test_parse_workflow_cli_step_fields(tmp_path: Path) -> None:

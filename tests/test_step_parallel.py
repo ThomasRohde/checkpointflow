@@ -5,7 +5,7 @@ from typing import Any
 
 from checkpointflow.engine.steps.parallel_step import execute
 from checkpointflow.models.state import RunContext
-from checkpointflow.models.workflow import CliStep, ParallelStep
+from checkpointflow.models.workflow import ApiStep, AwaitEventStep, CliStep, ParallelStep
 
 
 def _make_cli_step(step_id: str, command: str, *, shell: str | None = None) -> CliStep:
@@ -92,3 +92,60 @@ def test_parallel_merges_outputs(run_ctx: Callable[..., RunContext]) -> None:
     assert result.outputs is not None
     assert result.outputs["x"]["val"] == 1
     assert result.outputs["y"]["val"] == 2
+
+
+def test_parallel_with_await_event_branch_returns_error(
+    run_ctx: Callable[..., RunContext],
+) -> None:
+    step = ParallelStep.model_validate(
+        {
+            "id": "par",
+            "kind": "parallel",
+            "branches": [
+                {"start_at": "ok"},
+                {"start_at": "evt"},
+            ],
+        }
+    )
+    await_step = AwaitEventStep.model_validate(
+        {
+            "id": "evt",
+            "kind": "await_event",
+            "audience": "user",
+            "event_name": "approval",
+            "input_schema": {"type": "object"},
+        }
+    )
+    workflow_steps: list[Any] = [
+        _make_cli_step("ok", "echo ok"),
+        await_step,
+    ]
+    result = execute(step, run_ctx(), workflow_steps=workflow_steps)
+    assert result.success is False
+    assert result.error_message is not None
+    assert "await_event" in result.error_message
+    assert "not supported" in result.error_message
+
+
+def test_parallel_with_api_step_branch(run_ctx: Callable[..., RunContext]) -> None:
+    step = ParallelStep.model_validate(
+        {
+            "id": "par",
+            "kind": "parallel",
+            "branches": [
+                {"start_at": "api"},
+            ],
+        }
+    )
+    api_step = ApiStep.model_validate(
+        {
+            "id": "api",
+            "kind": "api",
+            "method": "GET",
+            "url": "http://127.0.0.1:1/unreachable",
+        }
+    )
+    workflow_steps: list[Any] = [api_step]
+    result = execute(step, run_ctx(), workflow_steps=workflow_steps)
+    assert result.success is False
+    assert result.error_message is not None

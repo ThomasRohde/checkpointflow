@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -195,5 +196,6 @@ def parse_workflow(path: str) -> dict[str, Any] | None:
             "steps": steps,
             "path": path,
         }
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to parse workflow {path!r}: {exc}", file=sys.stderr)
         return None

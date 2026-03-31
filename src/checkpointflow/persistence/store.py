@@ -4,6 +4,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 
@@ -257,6 +258,17 @@ class Store:
         for sub in ("stdout", "stderr", "artifacts"):
             (d / sub).mkdir(parents=True, exist_ok=True)
         return d
+
+    def __enter__(self) -> Store:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def close(self) -> None:
         self._conn.close()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import platform
 from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 from checkpointflow.engine.steps.foreach_step import execute
 from checkpointflow.models.state import RunContext
@@ -164,3 +167,87 @@ def test_foreach_with_workflow_ref(tmp_path: Path, run_ctx: Callable[..., RunCon
     assert result.success is True
     assert result.outputs is not None
     assert len(result.outputs["iterations"]) == 2
+
+
+def test_foreach_body_with_await_event_returns_error(
+    run_ctx: Callable[..., RunContext],
+) -> None:
+    """await_event steps are not supported in foreach body."""
+    step = ForeachStep.model_validate(
+        {
+            "id": "loop",
+            "kind": "foreach",
+            "items": "inputs.items",
+            "body": [
+                {
+                    "id": "wait",
+                    "kind": "await_event",
+                    "audience": "user",
+                    "event_name": "approval",
+                    "input_schema": {"type": "object"},
+                },
+            ],
+        }
+    )
+    result = execute(step, run_ctx(inputs={"items": ["a"]}))
+    assert result.success is False
+    assert result.error_message is not None
+    assert "await_event not supported in foreach body" in result.error_message
+
+
+def test_foreach_body_with_api_step(run_ctx: Callable[..., RunContext]) -> None:
+    """An api body step dispatches correctly; connection error propagates as failure."""
+    step = ForeachStep.model_validate(
+        {
+            "id": "loop",
+            "kind": "foreach",
+            "items": "inputs.items",
+            "body": [
+                {
+                    "id": "call",
+                    "kind": "api",
+                    "method": "GET",
+                    "url": "http://127.0.0.1:1/unreachable",
+                },
+            ],
+        }
+    )
+    result = execute(step, run_ctx(inputs={"items": ["x"]}))
+    assert result.success is False
+    assert result.error_message is not None
+
+
+@pytest.mark.skipif(platform.system() != "Windows", reason="echo syntax is platform-specific")
+def test_foreach_body_with_nested_foreach(run_ctx: Callable[..., RunContext]) -> None:
+    """A foreach body can contain another foreach step."""
+    step = ForeachStep.model_validate(
+        {
+            "id": "outer",
+            "kind": "foreach",
+            "items": "inputs.matrix",
+            "body": [
+                {
+                    "id": "inner",
+                    "kind": "foreach",
+                    "items": "inputs._foreach_item",
+                    "body": [
+                        {
+                            "id": "echo",
+                            "kind": "cli",
+                            "command": "echo ${item}",
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+    result = execute(step, run_ctx(inputs={"matrix": [["a", "b"], ["c"]]}))
+    assert result.success is True
+    assert result.outputs is not None
+    outer_iters = result.outputs["iterations"]
+    assert len(outer_iters) == 2
+    # Each outer iteration has an "inner" key with its own iterations
+    inner_0 = outer_iters[0]["inner"]["iterations"]
+    inner_1 = outer_iters[1]["inner"]["iterations"]
+    assert len(inner_0) == 2
+    assert len(inner_1) == 1

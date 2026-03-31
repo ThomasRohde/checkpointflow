@@ -6,10 +6,15 @@ from typing import Any
 import yaml
 
 from checkpointflow.engine.evaluator import EvaluatorError, interpolate_values
-from checkpointflow.engine.steps import cli_step, end_step
 from checkpointflow.models.errors import ErrorCode
 from checkpointflow.models.state import RunContext, StepResult
-from checkpointflow.models.workflow import CliStep, EndStep, WorkflowDocument, WorkflowRefStep
+from checkpointflow.models.workflow import (
+    AwaitEventStep,
+    EndStep,
+    SwitchStep,
+    WorkflowDocument,
+    WorkflowRefStep,
+)
 
 
 def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
@@ -50,11 +55,25 @@ def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
                 error_message=f"Step '{step.id}' input interpolation failed: {exc}",
             )
 
-    # Execute sub-workflow steps linearly
+    # Execute sub-workflow steps with support for SwitchStep jumps
+    all_sub_steps = list(sub_workflow.steps)
     sub_step_outputs: dict[str, dict[str, Any]] = {}
     final_result: dict[str, Any] | None = None
 
-    for sub_step in sub_workflow.steps:
+    idx = 0
+    while idx < len(all_sub_steps):
+        sub_step = all_sub_steps[idx]
+
+        if isinstance(sub_step, AwaitEventStep):
+            return StepResult(
+                success=False,
+                error_code=ErrorCode.ERR_STEP_FAILED,
+                error_message=(
+                    f"Step '{step.id}' sub-workflow step '{sub_step.id}': "
+                    f"await_event is not supported in sub-workflow execution."
+                ),
+            )
+
         sub_ctx = RunContext(
             run_id=ctx.run_id,
             inputs=sub_inputs,
@@ -63,19 +82,9 @@ def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
             defaults=sub_workflow.defaults or {},
         )
 
-        if isinstance(sub_step, CliStep):
-            result = cli_step.execute(sub_step, sub_ctx)
-        elif isinstance(sub_step, EndStep):
-            result = end_step.execute(sub_step, sub_ctx)
-        else:
-            return StepResult(
-                success=False,
-                error_code=ErrorCode.ERR_STEP_FAILED,
-                error_message=(
-                    f"Step '{step.id}' sub-workflow step '{sub_step.id}' "
-                    f"kind '{sub_step.kind}' not supported in sub-workflow execution."
-                ),
-            )
+        from checkpointflow.engine.steps.dispatch import dispatch_step
+
+        result = dispatch_step(sub_step, sub_ctx, workflow_steps=all_sub_steps)
 
         if not result.success:
             return StepResult(
@@ -93,5 +102,16 @@ def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
         if isinstance(sub_step, EndStep):
             final_result = result.outputs
             break
+
+        # SwitchStep: jump to target
+        if isinstance(sub_step, SwitchStep) and result.outputs:
+            next_step_id = result.outputs.get("_next_step_id")
+            if next_step_id:
+                step_ids = [s.id for s in all_sub_steps]
+                if next_step_id in step_ids:
+                    idx = step_ids.index(next_step_id)
+                    continue
+
+        idx += 1
 
     return StepResult(success=True, outputs=final_result or sub_step_outputs)

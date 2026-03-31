@@ -3,31 +3,39 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from checkpointflow.engine.steps import cli_step, end_step
 from checkpointflow.models.errors import ErrorCode
 from checkpointflow.models.state import RunContext, StepResult
-from checkpointflow.models.workflow import CliStep, EndStep, ParallelStep
+from checkpointflow.models.workflow import ParallelStep
 
 
 def _find_step(
     step_id: str,
     workflow_steps: list[Any],
-) -> CliStep | EndStep | None:
+) -> Any | None:
     """Find a step by ID in the workflow steps list."""
     for s in workflow_steps:
-        if s.id == step_id and isinstance(s, (CliStep, EndStep)):
+        if s.id == step_id:
             return s
     return None
 
 
 def _run_branch(
-    step: CliStep | EndStep,
+    step: Any,
     ctx: RunContext,
+    *,
+    workflow_steps: list[Any] | None = None,
 ) -> StepResult:
     """Execute a single branch step."""
-    if isinstance(step, CliStep):
-        return cli_step.execute(step, ctx)
-    return end_step.execute(step, ctx)
+    from checkpointflow.engine.steps.dispatch import dispatch_step
+    from checkpointflow.models.workflow import AwaitEventStep
+
+    if isinstance(step, AwaitEventStep):
+        return StepResult(
+            success=False,
+            error_code=ErrorCode.ERR_STEP_FAILED,
+            error_message="await_event is not supported in parallel branches.",
+        )
+    return dispatch_step(step, ctx, workflow_steps=workflow_steps)
 
 
 def execute(
@@ -41,7 +49,7 @@ def execute(
         workflow_steps = []
 
     # Resolve branch steps
-    branch_steps: list[tuple[str, CliStep | EndStep]] = []
+    branch_steps: list[tuple[str, Any]] = []
     for branch in step.branches:
         found = _find_step(branch.start_at, workflow_steps)
         if found is None:
@@ -59,7 +67,8 @@ def execute(
 
     with ThreadPoolExecutor(max_workers=len(branch_steps)) as executor:
         futures = {
-            executor.submit(_run_branch, bstep, ctx): step_id for step_id, bstep in branch_steps
+            executor.submit(_run_branch, bstep, ctx, workflow_steps=workflow_steps): step_id
+            for step_id, bstep in branch_steps
         }
         for future in as_completed(futures):
             step_id = futures[future]
