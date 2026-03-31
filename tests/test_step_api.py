@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 from threading import Thread
 from typing import Any
 
@@ -11,19 +11,6 @@ import pytest
 from checkpointflow.engine.steps.api_step import execute
 from checkpointflow.models.state import RunContext
 from checkpointflow.models.workflow import ApiStep
-
-
-def _ctx(tmp_path: Path, **kwargs: Any) -> RunContext:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir(exist_ok=True)
-    (run_dir / "stdout").mkdir(exist_ok=True)
-    (run_dir / "stderr").mkdir(exist_ok=True)
-    return RunContext(
-        run_id="test",
-        inputs=kwargs.get("inputs", {}),
-        step_outputs=kwargs.get("step_outputs", {}),
-        run_dir=run_dir,
-    )
 
 
 class _TestHandler(BaseHTTPRequestHandler):
@@ -77,7 +64,7 @@ def test_server() -> Any:
     server.shutdown()
 
 
-def test_api_get_json_response(tmp_path: Path, test_server: str) -> None:
+def test_api_get_json_response(run_ctx: Callable[..., RunContext], test_server: str) -> None:
     step = ApiStep.model_validate(
         {
             "id": "fetch",
@@ -86,14 +73,14 @@ def test_api_get_json_response(tmp_path: Path, test_server: str) -> None:
             "url": f"{test_server}/ok",
         }
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is True
     assert result.outputs is not None
     assert result.outputs["status"] == "ok"
     assert result.outputs["value"] == 42
 
 
-def test_api_get_text_response(tmp_path: Path, test_server: str) -> None:
+def test_api_get_text_response(run_ctx: Callable[..., RunContext], test_server: str) -> None:
     step = ApiStep.model_validate(
         {
             "id": "fetch",
@@ -102,13 +89,13 @@ def test_api_get_text_response(tmp_path: Path, test_server: str) -> None:
             "url": f"{test_server}/text",
         }
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is True
     assert result.outputs is not None
     assert result.outputs["body"] == "plain text response"
 
 
-def test_api_post_with_body(tmp_path: Path, test_server: str) -> None:
+def test_api_post_with_body(run_ctx: Callable[..., RunContext], test_server: str) -> None:
     step = ApiStep.model_validate(
         {
             "id": "send",
@@ -118,13 +105,13 @@ def test_api_post_with_body(tmp_path: Path, test_server: str) -> None:
             "body": {"key": "value"},
         }
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is True
     assert result.outputs is not None
     assert result.outputs["received"] == {"key": "value"}
 
 
-def test_api_server_error_fails(tmp_path: Path, test_server: str) -> None:
+def test_api_server_error_fails(run_ctx: Callable[..., RunContext], test_server: str) -> None:
     step = ApiStep.model_validate(
         {
             "id": "fail",
@@ -133,11 +120,11 @@ def test_api_server_error_fails(tmp_path: Path, test_server: str) -> None:
             "url": f"{test_server}/error",
         }
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is False
 
 
-def test_api_custom_success_codes(tmp_path: Path, test_server: str) -> None:
+def test_api_custom_success_codes(run_ctx: Callable[..., RunContext], test_server: str) -> None:
     step = ApiStep.model_validate(
         {
             "id": "ok500",
@@ -147,11 +134,11 @@ def test_api_custom_success_codes(tmp_path: Path, test_server: str) -> None:
             "success": {"status_codes": [500]},
         }
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is True
 
 
-def test_api_url_interpolation(tmp_path: Path, test_server: str) -> None:
+def test_api_url_interpolation(run_ctx: Callable[..., RunContext], test_server: str) -> None:
     step = ApiStep.model_validate(
         {
             "id": "fetch",
@@ -160,13 +147,13 @@ def test_api_url_interpolation(tmp_path: Path, test_server: str) -> None:
             "url": "${inputs.base_url}/ok",
         }
     )
-    result = execute(step, _ctx(tmp_path, inputs={"base_url": test_server}))
+    result = execute(step, run_ctx(inputs={"base_url": test_server}))
     assert result.success is True
     assert result.outputs is not None
     assert result.outputs["status"] == "ok"
 
 
-def test_api_connection_error(tmp_path: Path) -> None:
+def test_api_connection_error(run_ctx: Callable[..., RunContext]) -> None:
     step = ApiStep.model_validate(
         {
             "id": "fail",
@@ -175,7 +162,7 @@ def test_api_connection_error(tmp_path: Path) -> None:
             "url": "http://127.0.0.1:1/nonexistent",
         }
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is False
     assert result.error_message is not None
 
@@ -183,28 +170,47 @@ def test_api_connection_error(tmp_path: Path) -> None:
 # --- URL scheme validation ---
 
 
-def test_api_rejects_file_scheme(tmp_path: Path) -> None:
+def test_api_rejects_file_scheme(run_ctx: Callable[..., RunContext]) -> None:
     step = ApiStep.model_validate(
         {"id": "bad", "kind": "api", "method": "GET", "url": "file:///etc/passwd"}
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is False
     assert "scheme" in (result.error_message or "").lower()
 
 
-def test_api_rejects_gopher_scheme(tmp_path: Path) -> None:
+def test_api_rejects_gopher_scheme(run_ctx: Callable[..., RunContext]) -> None:
     step = ApiStep.model_validate(
         {"id": "bad", "kind": "api", "method": "GET", "url": "gopher://evil.com"}
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is False
     assert "scheme" in (result.error_message or "").lower()
 
 
-def test_api_rejects_data_scheme(tmp_path: Path) -> None:
+def test_api_rejects_data_scheme(run_ctx: Callable[..., RunContext]) -> None:
     step = ApiStep.model_validate(
         {"id": "bad", "kind": "api", "method": "GET", "url": "data:text/html,hello"}
     )
-    result = execute(step, _ctx(tmp_path))
+    result = execute(step, run_ctx())
     assert result.success is False
     assert "scheme" in (result.error_message or "").lower()
+
+
+# --- Header interpolation errors ---
+
+
+def test_api_header_interpolation_failure(run_ctx: Callable[..., RunContext]) -> None:
+    step = ApiStep.model_validate(
+        {
+            "id": "hdr",
+            "kind": "api",
+            "method": "GET",
+            "url": "http://localhost:1/test",
+            "headers": {"Authorization": "Bearer ${nonexistent.token}"},
+        }
+    )
+    result = execute(step, run_ctx())
+    assert result.success is False
+    assert "header" in (result.error_message or "").lower()
+    assert "Authorization" in (result.error_message or "")

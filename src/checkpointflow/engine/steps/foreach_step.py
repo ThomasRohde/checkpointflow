@@ -81,7 +81,7 @@ def execute(step: ForeachStep, ctx: RunContext) -> StepResult:
     # Parse body steps
     try:
         body_steps = [_parse_body_step(s) for s in step.body]
-    except (ValueError, Exception) as exc:
+    except Exception as exc:
         return StepResult(
             success=False,
             error_code=ErrorCode.ERR_STEP_FAILED,

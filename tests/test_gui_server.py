@@ -115,6 +115,16 @@ def test_api_workflows_list(client: TestClient) -> None:
     assert isinstance(resp.json(), list)
 
 
+# --- Security headers ---
+
+
+def test_security_headers_present(client: TestClient) -> None:
+    resp = client.get("/api/runs")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert "default-src" in resp.headers["content-security-policy"]
+
+
 # --- SPA fallback ---
 
 

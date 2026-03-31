@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import webbrowser
+from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from checkpointflow.gui.api import (
     bulk_delete_runs,
@@ -24,6 +26,33 @@ from checkpointflow.gui.api import (
 from checkpointflow.persistence.store import Store
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+_SECURITY_HEADERS = [
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"content-security-policy", b"default-src 'self'; script-src 'self' 'unsafe-inline'"),
+]
+
+
+class SecurityHeadersMiddleware:
+    """Add security headers to all HTTP responses."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: MutableMapping[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend(_SECURITY_HEADERS)
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 def _json(data: Any, status: int = 200) -> JSONResponse:
@@ -116,7 +145,7 @@ def create_app(base_dir: Path | None = None) -> Starlette:
     # SPA fallback for all other routes
     routes.append(Route("/{path:path}", spa_fallback))
 
-    return Starlette(routes=routes)
+    return SecurityHeadersMiddleware(Starlette(routes=routes))  # type: ignore[return-value]
 
 
 def run_server(port: int = 8420, base_dir: Path | None = None) -> None:

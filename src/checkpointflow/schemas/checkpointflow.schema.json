@@ -21,27 +21,6 @@
     "jsonSchemaLike": {
       "type": "object"
     },
-    "retry": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "max_attempts": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "backoff_seconds": {
-          "type": "number",
-          "minimum": 0
-        },
-        "strategy": {
-          "type": "string",
-          "enum": [
-            "fixed",
-            "exponential"
-          ]
-        }
-      }
-    },
     "success": {
       "type": "object",
       "additionalProperties": false,
@@ -112,9 +91,6 @@
             "medium",
             "high"
           ]
-        },
-        "retry": {
-          "$ref": "#/$defs/retry"
         },
         "outputs": {
           "$ref": "#/$defs/jsonSchemaLike"

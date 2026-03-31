@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Callable
 
 from checkpointflow.engine.steps.await_event_step import execute
 from checkpointflow.models.state import RunContext
 from checkpointflow.models.workflow import AwaitEventStep
-
-
-def _ctx(tmp_path: Path) -> RunContext:
-    return RunContext(run_id="test", inputs={}, step_outputs={}, run_dir=tmp_path)
 
 
 def _step() -> AwaitEventStep:
@@ -23,13 +19,13 @@ def _step() -> AwaitEventStep:
     )
 
 
-def test_await_event_step_returns_success(tmp_path: Path) -> None:
-    assert execute(_step(), _ctx(tmp_path)).success is True
+def test_await_event_step_returns_success(run_ctx: Callable[..., RunContext]) -> None:
+    assert execute(_step(), run_ctx()).success is True
 
 
-def test_await_event_step_returns_no_outputs(tmp_path: Path) -> None:
-    assert execute(_step(), _ctx(tmp_path)).outputs is None
+def test_await_event_step_returns_no_outputs(run_ctx: Callable[..., RunContext]) -> None:
+    assert execute(_step(), run_ctx()).outputs is None
 
 
-def test_await_event_step_returns_no_error(tmp_path: Path) -> None:
-    assert execute(_step(), _ctx(tmp_path)).error_code is None
+def test_await_event_step_returns_no_error(run_ctx: Callable[..., RunContext]) -> None:
+    assert execute(_step(), run_ctx()).error_code is None

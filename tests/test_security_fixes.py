@@ -3,26 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from checkpointflow.engine.runner import resume_workflow, run_workflow
 from checkpointflow.models.errors import ErrorCode
-
-
-def _write_workflow(tmp_path: Path, steps_yaml: str, inputs_schema: str = "type: object") -> Path:
-    wf = tmp_path / "workflow.yaml"
-    wf.write_text(f"""\
-schema_version: checkpointflow/v1
-workflow:
-  id: test_wf
-  version: "1.0"
-  inputs:
-    {inputs_schema}
-  steps:
-{steps_yaml}
-""")
-    return wf
-
 
 # --- P1: Resume rejects modified workflow ---
 
@@ -113,10 +98,9 @@ workflow:
 # --- P1: Broken if-conditions fail the run ---
 
 
-def test_broken_if_condition_fails_run(tmp_path: Path) -> None:
+def test_broken_if_condition_fails_run(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
     """A step with an unresolvable if-condition must fail the run."""
-    wf = _write_workflow(
-        tmp_path,
+    wf = write_workflow(
         """\
     - id: guarded
       kind: cli
@@ -132,10 +116,11 @@ def test_broken_if_condition_fails_run(tmp_path: Path) -> None:
     assert "if-condition" in env.error.message.lower() or "invalid" in env.error.message.lower()
 
 
-def test_valid_false_if_condition_skips_step(tmp_path: Path) -> None:
+def test_valid_false_if_condition_skips_step(
+    tmp_path: Path, write_workflow: Callable[..., Path]
+) -> None:
     """A valid if-condition that evaluates to false should skip the step."""
-    wf = _write_workflow(
-        tmp_path,
+    wf = write_workflow(
         """\
     - id: guarded
       kind: cli

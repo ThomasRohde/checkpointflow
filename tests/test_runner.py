@@ -1,24 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from checkpointflow.engine.runner import run_workflow
-
-
-def _write_workflow(tmp_path: Path, steps_yaml: str, inputs_schema: str = "type: object") -> Path:
-    wf = tmp_path / "workflow.yaml"
-    wf.write_text(f"""\
-schema_version: checkpointflow/v1
-workflow:
-  id: test_wf
-  version: "1.0"
-  inputs:
-    {inputs_schema}
-  steps:
-{steps_yaml}
-""")
-    return wf
 
 
 def _write_input(tmp_path: Path, data: dict[str, object]) -> Path:
@@ -30,9 +16,8 @@ def _write_input(tmp_path: Path, data: dict[str, object]) -> Path:
 # --- Input parsing ---
 
 
-def test_run_inline_input(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_inline_input(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -41,9 +26,8 @@ def test_run_inline_input(tmp_path: Path) -> None:
     assert env.ok is True
 
 
-def test_run_file_input(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_file_input(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -53,9 +37,8 @@ def test_run_file_input(tmp_path: Path) -> None:
     assert env.ok is True
 
 
-def test_run_invalid_json_input(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_invalid_json_input(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -66,9 +49,8 @@ def test_run_invalid_json_input(tmp_path: Path) -> None:
     assert env.error.code == "ERR_VALIDATION_INPUT"
 
 
-def test_run_input_file_not_found(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_input_file_not_found(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -79,9 +61,8 @@ def test_run_input_file_not_found(tmp_path: Path) -> None:
     assert env.error.code == "ERR_FILE_NOT_FOUND"
 
 
-def test_run_input_schema_validation(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_input_schema_validation(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -98,9 +79,8 @@ def test_run_input_schema_validation(tmp_path: Path) -> None:
 # --- Execution ---
 
 
-def test_run_single_end_step(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_single_end_step(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -111,9 +91,8 @@ def test_run_single_end_step(tmp_path: Path) -> None:
     assert env.exit_code == 0
 
 
-def test_run_cli_then_end(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_cli_then_end(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: greet
       kind: cli
@@ -126,9 +105,8 @@ def test_run_cli_then_end(tmp_path: Path) -> None:
     assert env.status == "completed"
 
 
-def test_run_step_outputs_forwarded(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_step_outputs_forwarded(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: step1
       kind: cli
@@ -143,9 +121,8 @@ def test_run_step_outputs_forwarded(tmp_path: Path) -> None:
     assert env.ok is True
 
 
-def test_run_skip_step_with_false_if(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_skip_step_with_false_if(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: skipped
       kind: cli
@@ -159,9 +136,8 @@ def test_run_skip_step_with_false_if(tmp_path: Path) -> None:
     assert env.status == "completed"
 
 
-def test_run_step_with_true_if(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_step_with_true_if(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: run_me
       kind: cli
@@ -174,9 +150,8 @@ def test_run_step_with_true_if(tmp_path: Path) -> None:
     assert env.ok is True
 
 
-def test_run_cli_failure_stops(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_cli_failure_stops(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: fail_step
       kind: cli
@@ -191,10 +166,11 @@ def test_run_cli_failure_stops(tmp_path: Path) -> None:
     assert env.error.code == "ERR_STEP_FAILED"
 
 
-def test_run_api_step_connection_failure(tmp_path: Path) -> None:
+def test_run_api_step_connection_failure(
+    tmp_path: Path, write_workflow: Callable[..., Path]
+) -> None:
     """API steps are now supported; a connection error results in step failure (exit 30)."""
-    wf = _write_workflow(
-        tmp_path,
+    wf = write_workflow(
         """\
     - id: call_api
       kind: api
@@ -211,9 +187,8 @@ def test_run_api_step_connection_failure(tmp_path: Path) -> None:
 # --- Persistence ---
 
 
-def test_run_envelope_has_run_id(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_envelope_has_run_id(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -223,9 +198,8 @@ def test_run_envelope_has_run_id(tmp_path: Path) -> None:
     assert len(env.run_id) > 0
 
 
-def test_run_envelope_has_workflow_id(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_envelope_has_workflow_id(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -256,9 +230,10 @@ workflow:
     assert env.workflow_description == "A workflow with a name and description"
 
 
-def test_run_envelope_omits_workflow_name_when_not_set(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_envelope_omits_workflow_name_when_not_set(
+    tmp_path: Path, write_workflow: Callable[..., Path]
+) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",

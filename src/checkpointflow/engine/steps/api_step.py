@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import urllib.error
 import urllib.parse
@@ -60,8 +59,16 @@ def execute(step: ApiStep, ctx: RunContext) -> StepResult:
         for k, v in step.headers.items():
             val = str(v)
             if "${" in val:
-                with contextlib.suppress(EvaluatorError):
+                try:
                     val = interpolate(val, eval_ctx)
+                except EvaluatorError as exc:
+                    return StepResult(
+                        success=False,
+                        error_code=ErrorCode.ERR_STEP_FAILED,
+                        error_message=(
+                            f"Step '{step.id}' header '{k}' interpolation failed: {exc}"
+                        ),
+                    )
             headers[k] = val
     if data is not None and "Content-Type" not in headers:
         headers["Content-Type"] = "application/json"

@@ -14,6 +14,7 @@ from checkpointflow.engine.evaluator import (
     evaluate_condition,
     strip_expression_wrapper,
 )
+from checkpointflow.engine.loader import parse_input as _parse_input
 from checkpointflow.engine.steps import (
     api_step,
     await_event_step,
@@ -46,21 +47,6 @@ from checkpointflow.schema import validate_workflow_document
 
 class RunError(Exception):
     pass
-
-
-def _parse_input(raw: str) -> dict[str, Any]:
-    """Parse input from inline JSON or @file reference."""
-    if raw.startswith("@"):
-        file_path = Path(raw[1:])
-        # Block path traversal sequences
-        if ".." in file_path.parts:
-            msg = f"Path traversal not allowed in input file path: {file_path}"
-            raise ValueError(msg)
-        if not file_path.exists():
-            msg = f"Input file not found: {file_path}"
-            raise FileNotFoundError(msg)
-        return json.loads(file_path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
-    return json.loads(raw)  # type: ignore[no-any-return]
 
 
 def _build_wait_detail(
@@ -630,83 +616,6 @@ def _resume_workflow_inner(
     )
 
 
-# --- cancel_run ---
-
-
-def delete_run(
-    run_id: str,
-    *,
-    base_dir: Path | None = None,
-) -> Envelope:
-    """Permanently delete a terminal run and all its data."""
-    store = Store(base_dir=base_dir)
-    run = store.get_run(run_id)
-
-    if run is None:
-        return Envelope.failure(
-            command="delete",
-            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
-            message=f"Run not found: {run_id}",
-            exit_code=ExitCode.VALIDATION_ERROR,
-        )
-
-    if run["status"] in ("created", "running", "waiting"):
-        return Envelope.failure(
-            command="delete",
-            error_code=ErrorCode.ERR_RUN_NOT_WAITING,
-            message=f"Cannot delete active run {run_id} (status: {run['status']})",
-            exit_code=ExitCode.RUNTIME_ERROR,
-            run_id=run_id,
-        )
-
-    store.delete_run(run_id)
-    return Envelope.success(
-        command="delete",
-        run_id=run_id,
-        workflow_id=run["workflow_id"],
-        workflow_name=run.get("workflow_name"),
-        workflow_description=run.get("workflow_description"),
-        workflow_version=run["workflow_version"],
-        result={"deleted": True},
-    )
-
-
-def cancel_run(
-    run_id: str,
-    reason: str,
-    *,
-    base_dir: Path | None = None,
-) -> Envelope:
-    """Cancel a waiting or running run."""
-    store = Store(base_dir=base_dir)
-    run = store.get_run(run_id)
-
-    if run is None:
-        return Envelope.failure(
-            command="cancel",
-            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
-            message=f"Run not found: {run_id}",
-            exit_code=ExitCode.VALIDATION_ERROR,
-        )
-
-    if run["status"] not in ("waiting", "running", "created"):
-        return Envelope.failure(
-            command="cancel",
-            error_code=ErrorCode.ERR_RUN_NOT_WAITING,
-            message=f"Run {run_id} cannot be cancelled (status: {run['status']})",
-            exit_code=ExitCode.RUNTIME_ERROR,
-            run_id=run_id,
-        )
-
-    store.update_run(run_id, status="cancelled")
-    return Envelope.success(
-        command="cancel",
-        status="cancelled",
-        exit_code=ExitCode.SUCCESS,
-        run_id=run_id,
-        workflow_id=run["workflow_id"],
-        workflow_name=run.get("workflow_name"),
-        workflow_description=run.get("workflow_description"),
-        workflow_version=run["workflow_version"],
-        result={"reason": reason},
-    )
+# Re-export lifecycle operations for backward compatibility
+from checkpointflow.engine.lifecycle import cancel_run as cancel_run  # noqa: E402
+from checkpointflow.engine.lifecycle import delete_run as delete_run  # noqa: E402

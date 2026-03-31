@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -10,29 +11,13 @@ from checkpointflow.cli import app
 runner = CliRunner()
 
 
-def _write_workflow(tmp_path: Path, steps_yaml: str) -> Path:
-    wf = tmp_path / "workflow.yaml"
-    wf.write_text(f"""\
-schema_version: checkpointflow/v1
-workflow:
-  id: test_wf
-  version: "1.0"
-  inputs:
-    type: object
-  steps:
-{steps_yaml}
-""")
-    return wf
-
-
 def test_run_help_exits_zero() -> None:
     result = runner.invoke(app, ["run", "--help"])
     assert result.exit_code == 0
 
 
-def test_run_valid_workflow_exits_zero(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_valid_workflow_exits_zero(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -45,9 +30,8 @@ def test_run_valid_workflow_exits_zero(tmp_path: Path) -> None:
     assert result.exit_code == 0
 
 
-def test_run_returns_json_envelope(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_returns_json_envelope(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -63,9 +47,8 @@ def test_run_returns_json_envelope(tmp_path: Path) -> None:
     assert envelope["status"] == "completed"
 
 
-def test_run_envelope_has_run_id(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_envelope_has_run_id(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -80,9 +63,8 @@ def test_run_envelope_has_run_id(tmp_path: Path) -> None:
     assert len(envelope["run_id"]) > 0
 
 
-def test_run_envelope_has_workflow_id(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_envelope_has_workflow_id(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -104,9 +86,8 @@ def test_run_nonexistent_file_exits_ten(tmp_path: Path) -> None:
     assert result.exit_code == 10
 
 
-def test_run_invalid_input_exits_ten(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_invalid_input_exits_ten(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: done
       kind: end""",
@@ -119,9 +100,8 @@ def test_run_invalid_input_exits_ten(tmp_path: Path) -> None:
     assert result.exit_code == 10
 
 
-def test_run_step_failure_exits_thirty(tmp_path: Path) -> None:
-    wf = _write_workflow(
-        tmp_path,
+def test_run_step_failure_exits_thirty(tmp_path: Path, write_workflow: Callable[..., Path]) -> None:
+    wf = write_workflow(
         """\
     - id: fail
       kind: cli

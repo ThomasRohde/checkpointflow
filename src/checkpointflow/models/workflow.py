@@ -6,14 +6,6 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class Retry(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    max_attempts: int | None = None
-    backoff_seconds: float | None = None
-    strategy: Literal["fixed", "exponential"] | None = None
-
-
 class Success(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -43,7 +35,6 @@ class BaseStepFields(BaseModel):
     step_if: str | None = Field(None, alias="if")
     timeout_seconds: int | None = None
     risk_level: Literal["low", "medium", "high"] | None = None
-    retry: Retry | None = None
     outputs: dict[str, Any] | None = None
     inputs: dict[str, Any] | None = None
     tags: list[str] | None = None

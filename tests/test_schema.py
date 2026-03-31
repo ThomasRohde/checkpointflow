@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 
+from checkpointflow.models.workflow import WorkflowDocument
 from checkpointflow.schema import (
     load_workflow_schema,
     validate_workflow_document,
@@ -49,3 +50,29 @@ def test_validate_cpf_feature_development_workflow() -> None:
         data = yaml.safe_load(f)
     errors = validate_workflow_document(data)
     assert errors == [], f"Feature development workflow should validate cleanly: {errors}"
+
+
+# --- Schema drift detection ---
+
+
+def test_pydantic_fields_covered_by_json_schema() -> None:
+    """Ensure the checked-in JSON schema covers the same fields as the Pydantic models."""
+    pydantic_schema = WorkflowDocument.model_json_schema()
+    json_schema = load_workflow_schema()
+
+    # Extract workflow properties from both schemas
+    pydantic_wf = pydantic_schema["$defs"]["Workflow"]["properties"]
+    json_wf = json_schema["$defs"]["workflow"]["properties"]
+
+    pydantic_keys = set(pydantic_wf.keys())
+    json_keys = set(json_wf.keys())
+
+    missing_from_json = pydantic_keys - json_keys
+    missing_from_pydantic = json_keys - pydantic_keys
+
+    assert not missing_from_json, (
+        f"Pydantic Workflow has fields not in JSON schema: {missing_from_json}"
+    )
+    assert not missing_from_pydantic, (
+        f"JSON schema has fields not in Pydantic Workflow: {missing_from_pydantic}"
+    )
