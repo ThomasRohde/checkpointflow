@@ -64,7 +64,7 @@ When you see this:
 
 When you see this:
 1. Present the prompt context to the user
-2. Collect their input via structured prompts (AskUserQuestion)
+2. Collect their input via structured prompts
 3. Resume: `cpf resume --run-id <id> --event scope_choice --input '{"scope": "full"}'`
 
 ## Critical: Collect input through structured prompts, not chat
@@ -73,45 +73,31 @@ Every time the workflow needs input from the user — whether collecting workflo
 
 Do not say "what would you like to do?" and wait for a text reply. Always present choices and collect input through a structured prompt tool.
 
-## Finding workflows
-
-When the user asks to run a workflow without giving a full path, search these locations in order:
-
-1. The path the user provided (if any)
-2. `.checkpointflow/` in the current working directory
-3. `~/.checkpointflow/`
-4. `examples/` in the current project (if it's a checkpointflow repo)
-
-Use glob patterns like `**/*.yaml` to find workflow files. If multiple matches exist, use a structured prompt tool to let the user pick which one.
-
-If no workflows are found, tell the user and suggest they create one (the `cpf-workflow-author` skill can help with that).
-
 ## Running a workflow
 
-### Step 1: Present the workflow
+### Step 1: Discover and understand the flow
 
-When the envelope comes back (from `cpf run` or `cpf resume`), use `workflow_name` and `workflow_description` from the JSON envelope to introduce the workflow to the user. This gives context even if you haven't read the YAML file.
+Use `cpf flows` to list available workflows, then `cpf flows --detail <id>` to see everything about a specific flow — description, required/optional inputs with types and descriptions, step overview, and a ready-to-use run command:
 
-### Step 2: Identify inputs
+```bash
+cpf flows                        # List all available workflows
+cpf flows --detail <id>          # Full detail: inputs, steps, run command
+```
 
-Read the workflow YAML to check what inputs it requires:
-- Look at `workflow.inputs.required` and `workflow.inputs.properties`
-- If the user hasn't provided inputs, use a structured prompt tool to collect them
-- For complex inputs, ask the user to provide JSON
+The detail output tells you exactly what inputs to collect and gives you the `cpf run` command template. No need to read the workflow YAML.
 
-### Step 3: Build good prompt options from the schema
+### Step 2: Collect inputs and execute
 
-For each input property, build AskUserQuestion options using this priority:
+Use the inputs section from `cpf flows --detail` to collect values from the user via structured prompts. For each input property, build prompt options using this priority:
 
-1. **`enum` array** → one option per enum value (the user picks one)
+1. **`enum` values** → one option per enum value (the user picks one)
 2. **`type: boolean`** → two options: "Yes" / "No"
-3. **`examples` array** → one option per example value (the user picks one or types "Other" for a custom value). This is the key mechanism for free-text fields — workflow authors provide examples that become real, meaningful options.
-4. **`description` with inline examples** → if the description contains patterns like `e.g. "foo", "bar"` or `(e.g. "foo", "bar")`, extract those values and use them as options
-5. **No examples available** → use the `description` text itself to craft 2 meaningful, distinct example options that illustrate the expected format
+3. **`examples` array** → one option per example value (user picks one or types custom)
+4. **No examples** → craft 2 realistic example values from the description
 
 **Never create placeholder options** like "Type value" or "Enter value". Every option should be a real, plausible value the user might choose.
 
-### Step 4: Execute
+Then run:
 
 ```bash
 cpf run -f <path> --input '<json>'
@@ -119,7 +105,7 @@ cpf run -f <path> --input '<json>'
 
 Parse the JSON envelope from stdout. The `ok`, `status`, and `exit_code` fields tell you what happened.
 
-### Step 5: Handle the result
+### Step 3: Handle the result
 
 Based on `exit_code`:
 
@@ -155,11 +141,7 @@ Present the checkpoint to the user and collect their input.
 
 1. **Read the wait block** — extract `prompt`, `input_schema`, `event_name`, and `run_id`.
 
-2. **Collect input using AskUserQuestion** — map each field in `input_schema` to a question using the same option-building rules from Step 3 above:
-   - `enum` → one option per value
-   - `boolean` → "Yes" / "No"
-   - `examples` array → one option per example (user can always pick "Other")
-   - Free-text without examples → craft 2 realistic example values from context
+2. **Collect input** — map each field in `input_schema` to a structured prompt using the same option-building rules from Step 2 above.
 
    **Multiple fields:** If `input_schema` has multiple `required` fields, ask them together in a single prompt call when possible. Optional fields can be asked in a follow-up or skipped.
 
@@ -178,42 +160,6 @@ Present the checkpoint to the user and collect their input.
    - If error → show it
 
 Keep looping until the workflow completes, fails, or the user wants to stop.
-
-**Example interaction flow:**
-
-```
-User: run the feature development workflow
-→ cpf run -f examples/cpf_feature_development.yaml --input '{"feature_name": "run-delete", ...}'
-→ Exit 40: audience=agent at "analyze_codebase"
-  → Read prompt, analyze the codebase for real
-  → Resume with real findings JSON
-→ Exit 40: audience=user at "scope_decision"
-  → Present analysis results + structured prompt for scope
-  → User picks "full"
-  → Resume with {"scope": "full"}
-→ Exit 40: audience=agent at "tdd_plan"
-  → Read prompt, design real test plan
-  → Resume with test plan JSON
-→ Exit 40: audience=user at "review_tdd_plan"
-  → Present TDD plan + structured prompt for approval
-  → User picks "approve"
-  → Resume with {"decision": "approve"}
-→ Exit 40: audience=agent at "write_tests"
-  → Write real test files
-  → Resume with results
-→ Exit 40: audience=agent at "implement_feature"
-  → Write production code, run tests
-  → Resume with results
-→ Exit 40: audience=agent at "quality_gate"
-  → Run ruff, mypy, pytest — fix issues
-  → Resume with pass/fail results
-→ (gate_result switch routes to final_review)
-→ Exit 40: audience=user at "final_review"
-  → Present quality results + structured prompt
-  → User picks "ship_it"
-  → Resume
-→ Exit 0: completed
-```
 
 ## Status and inspection
 
@@ -245,8 +191,6 @@ cpf gui                    # opens http://localhost:8420
 cpf gui --port 9000        # custom port
 ```
 
-The dashboard shows workflow graphs with all step types rendered, run history with search/sort, and step detail panels.
-
 ## Tips
 
 - **Agent pauses are auto-resume** — never present them to the user. Do the work silently and resume.
@@ -257,4 +201,3 @@ The dashboard shows workflow graphs with all step types rendered, run history wi
 - When showing results to the user, format them nicely — don't dump raw JSON unless they ask for it.
 - If a workflow has multiple sequential `await_event` steps (like a quiz), keep the loop going smoothly without re-explaining the process each time.
 - The `--input` flag accepts either inline JSON (`'{"key": "value"}'`) or a file reference (`@path/to/file.json`). Prefer inline for simple inputs.
-- Use `workflow_name` and `workflow_description` from the envelope to provide context to the user, especially on the first interaction.

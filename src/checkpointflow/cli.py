@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
 import yaml
+
+if TYPE_CHECKING:
+    from checkpointflow.discovery import DiscoveredWorkflow
 
 from checkpointflow import __version__
 from checkpointflow.models.envelope import Envelope
@@ -345,6 +348,70 @@ def gui(
     run_server(port=port, base_dir=_get_base_dir())
 
 
+def _print_flow_detail(match: DiscoveredWorkflow) -> None:
+    """Print comprehensive flow details so an agent can run it without reading source."""
+    import json
+
+    # Identity
+    typer.echo(f"id: {match.workflow_id}" if match.workflow_id else f"name: {match.name}")
+    if match.workflow_id:
+        typer.echo(f"name: {match.name}")
+    if match.version:
+        typer.echo(f"version: {match.version}")
+    if match.description:
+        typer.echo(f"description: {match.description.strip()}")
+
+    # Load the full YAML for inputs and steps
+    try:
+        doc = yaml.safe_load(match.path.read_text(encoding="utf-8"))
+        wf = doc.get("workflow", {})
+    except Exception:
+        typer.echo(f"\nrun: cpf run -f {match.path}")
+        return
+
+    # Inputs
+    inputs_schema = wf.get("inputs", {})
+    properties = inputs_schema.get("properties", {})
+    required_keys = set(inputs_schema.get("required", []))
+    if properties:
+        typer.echo("\ninputs:")
+        for key, prop in properties.items():
+            tag = " (required)" if key in required_keys else ""
+            prop_type = prop.get("type", "string")
+            desc = prop.get("description", "").strip()
+            enum_vals = prop.get("enum")
+            line = f"  {key}{tag}: {prop_type}"
+            if enum_vals:
+                line += f" — one of: {', '.join(str(v) for v in enum_vals)}"
+            if desc:
+                line += f" — {desc}"
+            typer.echo(line)
+
+    # Steps overview
+    steps = wf.get("steps", [])
+    non_end_steps = [s for s in steps if s.get("kind") != "end"]
+    if non_end_steps:
+        typer.echo("\nsteps:")
+        for step in non_end_steps:
+            step_id = step.get("id", "?")
+            kind = step.get("kind", "?")
+            name = step.get("name", "")
+            audience = step.get("audience", "")
+            parts = [f"  {step_id}: {kind}"]
+            if name:
+                parts.append(f'"{name}"')
+            if audience:
+                parts.append(f"[{audience}]")
+            typer.echo(" ".join(parts))
+
+    # Run command with input template (required inputs only, short placeholders)
+    input_template: dict[str, str] = {}
+    for key in properties:
+        if key in required_keys:
+            input_template[key] = f"<{key}>"
+    typer.echo(f"\nrun: cpf run -f {match.path} --input '{json.dumps(input_template)}'")
+
+
 @app.command()
 def flows(
     detail: Annotated[
@@ -370,17 +437,15 @@ def flows(
         if match is None:
             typer.echo(f'No workflow matching "{detail}".')
             raise typer.Exit(code=1)
-        typer.echo(match.name)
-        if match.workflow_id:
-            typer.echo(f"  id: {match.workflow_id}")
-        if match.version:
-            typer.echo(f"  version: {match.version}")
-        if match.description:
-            typer.echo(f"  {match.description.strip()}")
-        typer.echo(f"  run: cpf run -f {match.path}")
+        _print_flow_detail(match)
     else:
         for wf in found:
-            typer.echo(f"{wf.workflow_id}  {wf.name}" if wf.workflow_id else wf.name)
+            typer.echo(f"- id: {wf.workflow_id}" if wf.workflow_id else f"- name: {wf.name}")
+            if wf.workflow_id:
+                typer.echo(f"  name: {wf.name}")
+        typer.echo("")
+        typer.echo("Show details: cpf flows --detail <id>")
+        typer.echo("Run a flow:   cpf run <id>")
 
 
 def main() -> None:

@@ -32,7 +32,23 @@ workflow:
   version: "2.0.0"
   inputs:
     type: object
+    required: [project_dir]
+    properties:
+      project_dir:
+        type: string
+        description: Absolute path to the repo root
+      verbose:
+        type: boolean
+        description: Enable verbose output
   steps:
+    - id: check
+      kind: cli
+      name: Run checks
+      command: echo ok
+    - id: review
+      kind: await_event
+      name: Human review
+      audience: user
     - id: done
       kind: end
 """
@@ -54,14 +70,28 @@ def _make_workflow_dir(base: Path, *yamls: tuple[str, str]) -> Path:
 
 
 def test_flows_lists_ids_and_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_workflow_dir(tmp_path, ("a.yaml", WORKFLOW_A), ("b.yaml", WORKFLOW_B))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "fakehome"))
+
+    result = runner.invoke(app, ["flows"])
+    assert result.exit_code == 0
+    # Each entry should clearly show id and name on labeled lines
+    assert "id: workflow_a" in result.stdout
+    assert "name: Workflow Alpha" in result.stdout
+    assert "id: workflow_b" in result.stdout
+    assert "name: Workflow Beta" in result.stdout
+
+
+def test_flows_list_shows_hint_footer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_workflow_dir(tmp_path, ("a.yaml", WORKFLOW_A))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "fakehome"))
 
     result = runner.invoke(app, ["flows"])
     assert result.exit_code == 0
-    assert "workflow_a" in result.stdout
-    assert "Workflow Alpha" in result.stdout
+    assert "cpf flows --detail <id>" in result.stdout
+    assert "cpf run" in result.stdout
 
 
 def test_flows_shows_no_workflows_found_message(
@@ -75,22 +105,45 @@ def test_flows_shows_no_workflows_found_message(
     assert "No workflows found" in result.stdout
 
 
-def test_flows_detail_shows_description_and_run_command(
+def test_flows_detail_shows_full_info_for_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _make_workflow_dir(tmp_path, ("a.yaml", WORKFLOW_A), ("b.yaml", WORKFLOW_B))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "fakehome"))
 
-    result = runner.invoke(app, ["flows", "--detail", "workflow_a"])
+    result = runner.invoke(app, ["flows", "--detail", "workflow_b"])
     assert result.exit_code == 0
-    assert "First test workflow for listing." in result.stdout
-    assert "1.0.0" in result.stdout
-    assert "cpf run -f" in result.stdout
-    assert "Workflow Beta" not in result.stdout
+    out = result.stdout
+
+    # Identity
+    assert "id: workflow_b" in out
+    assert "name: Workflow Beta" in out
+    assert "version: 2.0.0" in out
+    assert "description:" in out
+
+    # Inputs section with required/optional distinction
+    assert "inputs:" in out
+    assert "project_dir" in out
+    assert "(required)" in out
+    assert "verbose" in out
+
+    # Steps overview
+    assert "steps:" in out
+    assert "check" in out
+    assert "cli" in out
+    assert "review" in out
+    assert "await_event" in out
+
+    # Run command uses -f with the actual path
+    assert "cpf run -f" in out
+    assert "--input" in out
+
+    # Does NOT leak other workflows
+    assert "Workflow Alpha" not in out
 
 
-def test_flows_detail_does_not_show_raw_path(
+def test_flows_detail_path_only_in_run_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _make_workflow_dir(tmp_path, ("a.yaml", WORKFLOW_A))
@@ -101,10 +154,8 @@ def test_flows_detail_does_not_show_raw_path(
     assert result.exit_code == 0
     # The path should only appear inside the run command, not on its own line
     for line in result.stdout.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("run:"):
-            continue
-        assert ".checkpointflow" not in stripped or "cpf run" in stripped
+        if ".checkpointflow" in line:
+            assert line.strip().startswith("run:")
 
 
 def test_flows_detail_by_name_is_case_insensitive(
