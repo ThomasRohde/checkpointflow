@@ -1,9 +1,0 @@
-{
-  "persona": "security",
-  "correlation_id": "security-036fe3a467b0",
-  "verdict": "approve",
-  "summary": "The codebase demonstrates strong security practices across all major attack surfaces. YAML parsing uses safe_load everywhere, SQL queries are fully parameterized with a column-name whitelist on dynamic updates, the web GUI has bearer token authentication and security headers, and the expression evaluator is a restricted DSL with no eval/exec. Nine non-blocking findings remain, primarily around defense-in-depth hardening for shell command interpolation, SSRF in the API step, and CSP tightening.",
-  "blocking_count": 0,
-  "finding_count": 9,
-  "report_file": "C:/Users/thoma/Projects/checkpointflow/.review-artifacts/security-review-report.json"
-}

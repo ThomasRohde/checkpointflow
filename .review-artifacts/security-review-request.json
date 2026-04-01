@@ -1,7 +1,0 @@
-{
-  "persona": "security",
-  "correlation_id": "security-c91c04851ac0",
-  "context_file": "C:\\Users\\thoma\\Projects\\checkpointflow\\.review-artifacts\\review_context.json",
-  "suggested_report_file": "C:\\Users\\thoma\\Projects\\checkpointflow\\.review-artifacts\\security-review-report.json",
-  "instructions": "Review the prepared code review context. Produce a JSON report with persona, verdict, summary, blocking_count, finding_count, and findings. Then resume the waiting workflow step with the same metadata plus report_file."
-}
