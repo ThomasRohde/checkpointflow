@@ -14,6 +14,7 @@ from checkpointflow.engine.evaluator import (
     evaluate_condition,
     strip_expression_wrapper,
 )
+from checkpointflow.engine.flow_control import resolve_switch_jump
 from checkpointflow.engine.loader import parse_input as _parse_input
 from checkpointflow.engine.steps.dispatch import dispatch_step
 from checkpointflow.models.envelope import Envelope, WaitDetail, WaitResume
@@ -119,19 +120,6 @@ def _handle_end_step(
         current_step_id=step_id,
         result=final_result if final_result else None,
     )
-
-
-def resolve_switch_jump(
-    result_outputs: dict[str, Any],
-    all_steps: list[Any],
-    step_ids: list[str],
-) -> tuple[list[Any], int] | None:
-    """Resolve a SwitchStep jump target. Returns (remaining_steps, target_idx) or None."""
-    next_step_id = result_outputs.get("_next_step_id")
-    if next_step_id and next_step_id in step_ids:
-        target_idx = step_ids.index(next_step_id)
-        return list(all_steps[target_idx:]), target_idx
-    return None
 
 
 def _execute_steps(

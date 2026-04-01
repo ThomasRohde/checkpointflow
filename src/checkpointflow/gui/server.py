@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
 import webbrowser
 from collections.abc import AsyncGenerator, MutableMapping
 from contextlib import asynccontextmanager
@@ -65,6 +64,14 @@ class CORSMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
+    @staticmethod
+    def _is_allowed_origin(origin: bytes) -> bool:
+        prefix = CORSMiddleware._ALLOWED_ORIGIN_PREFIX
+        if not origin.startswith(prefix):
+            return False
+        rest = origin[len(prefix) :]
+        return rest == b"" or rest[:1] in (b":", b"/")
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -73,7 +80,7 @@ class CORSMiddleware:
         headers = dict(scope.get("headers", []))
         origin = headers.get(b"origin", b"")
 
-        if not origin.startswith(self._ALLOWED_ORIGIN_PREFIX):
+        if not self._is_allowed_origin(origin):
             # No CORS headers for non-localhost origins
             await self.app(scope, receive, send)
             return
@@ -106,44 +113,14 @@ class CORSMiddleware:
         await self.app(scope, receive, send_with_cors)
 
 
-class TokenAuthMiddleware:
-    """Require a bearer token or query-param token on /api/ routes."""
-
-    def __init__(self, app: ASGIApp, token: str) -> None:
-        self.app = app
-        self.token = token
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            scope["type"] == "http"
-            and scope.get("path", "").startswith("/api/")
-            and not self._check_token(scope)
-        ):
-            response = JSONResponse({"error": "Unauthorized"}, status_code=401)
-            await response(scope, receive, send)
-            return
-        await self.app(scope, receive, send)
-
-    def _check_token(self, scope: Scope) -> bool:
-        # Check Authorization header
-        headers = dict(scope.get("headers", []))
-        auth = headers.get(b"authorization", b"").decode()
-        if auth == f"Bearer {self.token}":
-            return True
-        # Check query param
-        qs: str = scope.get("query_string", b"").decode()
-        return any(part.startswith("token=") and part[6:] == self.token for part in qs.split("&"))
-
-
 def _json(data: Any, status: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status)
 
 
-def create_app(base_dir: Path | None = None) -> tuple[Starlette, str]:
-    """Create the Starlette ASGI app. Returns (app, auth_token)."""
+def create_app(base_dir: Path | None = None) -> Starlette:
+    """Create the Starlette ASGI app."""
     resolved_base = base_dir or Path.home() / ".checkpointflow"
     store = Store(base_dir=resolved_base)
-    token = secrets.token_urlsafe(32)
 
     async def api_runs(request: Request) -> Response:
         return _json(list_runs(store))
@@ -232,8 +209,7 @@ def create_app(base_dir: Path | None = None) -> tuple[Starlette, str]:
         store.close()
 
     inner = Starlette(routes=routes, lifespan=lifespan)
-    app = SecurityHeadersMiddleware(CORSMiddleware(TokenAuthMiddleware(inner, token)))
-    return app, token  # type: ignore[return-value]
+    return SecurityHeadersMiddleware(CORSMiddleware(inner))  # type: ignore[return-value]
 
 
 def run_server(port: int = 8420, base_dir: Path | None = None) -> None:
@@ -247,8 +223,8 @@ def run_server(port: int = 8420, base_dir: Path | None = None) -> None:
     if sys.platform == "win32":
         signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    app, token = create_app(base_dir=base_dir)
-    url = f"http://localhost:{port}?token={token}"
+    app = create_app(base_dir=base_dir)
+    url = f"http://localhost:{port}"
     print(f"checkpointflow dashboard: {url}")
     webbrowser.open(url)
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

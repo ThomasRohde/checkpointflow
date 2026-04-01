@@ -55,7 +55,9 @@ class _TestHandler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture()
-def test_server() -> Any:
+def test_server(monkeypatch: pytest.MonkeyPatch) -> Any:
+    # Bypass SSRF protection for integration tests against localhost
+    monkeypatch.setattr("checkpointflow.engine.steps.api_step._is_blocked_host", lambda _: False)
     server = HTTPServer(("127.0.0.1", 0), _TestHandler)
     port = server.server_address[1]
     thread = Thread(target=server.serve_forever, daemon=True)
@@ -153,7 +155,10 @@ def test_api_url_interpolation(run_ctx: Callable[..., RunContext], test_server: 
     assert result.outputs["status"] == "ok"
 
 
-def test_api_connection_error(run_ctx: Callable[..., RunContext]) -> None:
+def test_api_connection_error(
+    run_ctx: Callable[..., RunContext], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("checkpointflow.engine.steps.api_step._is_blocked_host", lambda _: False)
     step = ApiStep.model_validate(
         {
             "id": "fail",
@@ -200,7 +205,10 @@ def test_api_rejects_data_scheme(run_ctx: Callable[..., RunContext]) -> None:
 # --- Header interpolation errors ---
 
 
-def test_api_header_interpolation_failure(run_ctx: Callable[..., RunContext]) -> None:
+def test_api_header_interpolation_failure(
+    run_ctx: Callable[..., RunContext], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("checkpointflow.engine.steps.api_step._is_blocked_host", lambda _: False)
     step = ApiStep.model_validate(
         {
             "id": "hdr",
@@ -227,6 +235,50 @@ def test_api_blocks_metadata_endpoint(run_ctx: Callable[..., RunContext]) -> Non
             "method": "GET",
             "url": "http://169.254.169.254/latest/meta-data/",
         }
+    )
+    result = execute(step, run_ctx())
+    assert result.success is False
+    assert "blocked" in (result.error_message or "").lower()
+
+
+def test_api_blocks_loopback_address(run_ctx: Callable[..., RunContext]) -> None:
+    step = ApiStep.model_validate(
+        {"id": "ssrf", "kind": "api", "method": "GET", "url": "http://127.0.0.1/test"}
+    )
+    result = execute(step, run_ctx())
+    assert result.success is False
+    assert "blocked" in (result.error_message or "").lower()
+
+
+def test_api_blocks_private_address(run_ctx: Callable[..., RunContext]) -> None:
+    step = ApiStep.model_validate(
+        {"id": "ssrf", "kind": "api", "method": "GET", "url": "http://10.0.0.1/test"}
+    )
+    result = execute(step, run_ctx())
+    assert result.success is False
+    assert "blocked" in (result.error_message or "").lower()
+
+
+def test_api_blocks_reserved_address(run_ctx: Callable[..., RunContext]) -> None:
+    step = ApiStep.model_validate(
+        {"id": "ssrf", "kind": "api", "method": "GET", "url": "http://0.0.0.0/test"}
+    )
+    result = execute(step, run_ctx())
+    assert result.success is False
+    assert "blocked" in (result.error_message or "").lower()
+
+
+def test_api_dns_failure_blocks_request(
+    run_ctx: Callable[..., RunContext], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket as _socket
+
+    monkeypatch.setattr(
+        "checkpointflow.engine.steps.api_step.socket.gethostbyname",
+        lambda _: (_ for _ in ()).throw(_socket.gaierror("DNS failed")),
+    )
+    step = ApiStep.model_validate(
+        {"id": "ssrf", "kind": "api", "method": "GET", "url": "http://will-not-resolve.invalid/"}
     )
     result = execute(step, run_ctx())
     assert result.success is False

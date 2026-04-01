@@ -15,7 +15,11 @@ from checkpointflow.models.workflow import ApiStep
 
 
 def _is_blocked_host(hostname: str) -> bool:
-    """Return True if the hostname resolves to a link-local IP (SSRF protection)."""
+    """Return True if the hostname resolves to a blocked IP (SSRF protection).
+
+    Blocks loopback, private, link-local, and reserved addresses.
+    Returns True (fail-closed) when DNS resolution fails.
+    """
     try:
         addr = ipaddress.ip_address(hostname)
     except ValueError:
@@ -23,8 +27,8 @@ def _is_blocked_host(hostname: str) -> bool:
         try:
             addr = ipaddress.ip_address(socket.gethostbyname(hostname))
         except (socket.gaierror, ValueError):
-            return False
-    return addr.is_link_local
+            return True
+    return addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved
 
 
 def execute(step: ApiStep, ctx: RunContext) -> StepResult:
@@ -62,7 +66,7 @@ def execute(step: ApiStep, ctx: RunContext) -> StepResult:
             error_code=ErrorCode.ERR_STEP_FAILED,
             error_message=(
                 f"Step '{step.id}' URL targets a blocked address ({hostname}). "
-                f"Requests to link-local and cloud metadata endpoints are not allowed."
+                f"Requests to internal, private, or reserved network addresses are not allowed."
             ),
         )
 

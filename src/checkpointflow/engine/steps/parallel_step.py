@@ -72,10 +72,10 @@ def execute(
                 bstep,
                 RunContext(
                     run_id=ctx.run_id,
-                    inputs=ctx.inputs,
-                    step_outputs=dict(ctx.step_outputs),
+                    inputs=dict(ctx.inputs),
+                    step_outputs={k: dict(v) for k, v in ctx.step_outputs.items()},
                     run_dir=ctx.run_dir,
-                    defaults=ctx.defaults,
+                    defaults=dict(ctx.defaults),
                 ),
                 workflow_steps=workflow_steps,
             ): step_id

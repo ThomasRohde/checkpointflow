@@ -105,7 +105,7 @@ def execute(step: WorkflowRefStep, ctx: RunContext) -> StepResult:
 
         # SwitchStep: jump to target
         if isinstance(sub_step, SwitchStep) and result.outputs:
-            from checkpointflow.engine.runner import resolve_switch_jump
+            from checkpointflow.engine.flow_control import resolve_switch_jump
 
             sub_step_ids = [s.id for s in all_sub_steps]
             jump = resolve_switch_jump(result.outputs, all_sub_steps, sub_step_ids)

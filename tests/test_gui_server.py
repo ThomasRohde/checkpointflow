@@ -23,8 +23,8 @@ def store(base_dir: Path) -> Store:
 
 @pytest.fixture()
 def client(base_dir: Path) -> TestClient:
-    app, token = create_app(base_dir=base_dir)
-    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    app = create_app(base_dir=base_dir)
+    return TestClient(app)
 
 
 def _make_completed_run(store: Store) -> str:
@@ -152,45 +152,6 @@ def test_security_headers_present(client: TestClient) -> None:
     assert "default-src" in resp.headers["content-security-policy"]
 
 
-# --- Auth token ---
-
-
-def test_api_rejects_request_without_token(base_dir: Path) -> None:
-    app, _token = create_app(base_dir=base_dir)
-    client = TestClient(app)
-    resp = client.get("/api/runs", headers={})
-    assert resp.status_code == 401
-
-
-def test_api_accepts_bearer_token(base_dir: Path) -> None:
-    app, token = create_app(base_dir=base_dir)
-    client = TestClient(app)
-    resp = client.get("/api/runs", headers={"Authorization": f"Bearer {token}"})
-    assert resp.status_code == 200
-
-
-def test_api_accepts_query_param_token(base_dir: Path) -> None:
-    app, token = create_app(base_dir=base_dir)
-    client = TestClient(app)
-    resp = client.get(f"/api/runs?token={token}")
-    assert resp.status_code == 200
-
-
-def test_api_rejects_wrong_token(base_dir: Path) -> None:
-    app, _token = create_app(base_dir=base_dir)
-    client = TestClient(app)
-    resp = client.get("/api/runs", headers={"Authorization": "Bearer wrong"})
-    assert resp.status_code == 401
-
-
-def test_static_routes_skip_auth(base_dir: Path) -> None:
-    app, _token = create_app(base_dir=base_dir)
-    client = TestClient(app)
-    # SPA fallback should not require auth
-    resp = client.get("/some/random/path")
-    assert resp.status_code in (200, 503)
-
-
 # --- SPA fallback ---
 
 
@@ -203,8 +164,8 @@ def test_spa_fallback(client: TestClient) -> None:
 
 
 def test_cors_preflight_returns_headers(base_dir: Path) -> None:
-    app, token = create_app(base_dir=base_dir)
-    client = TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    app = create_app(base_dir=base_dir)
+    client = TestClient(app)
     resp = client.options(
         "/api/runs",
         headers={"Origin": "http://localhost:8420", "Access-Control-Request-Method": "GET"},
@@ -214,7 +175,14 @@ def test_cors_preflight_returns_headers(base_dir: Path) -> None:
 
 
 def test_cors_rejects_non_localhost_origin(base_dir: Path) -> None:
-    app, token = create_app(base_dir=base_dir)
-    client = TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    app = create_app(base_dir=base_dir)
+    client = TestClient(app)
     resp = client.get("/api/runs", headers={"Origin": "http://evil.com"})
+    assert "access-control-allow-origin" not in resp.headers
+
+
+def test_cors_rejects_localhost_prefix_bypass(base_dir: Path) -> None:
+    app = create_app(base_dir=base_dir)
+    client = TestClient(app)
+    resp = client.get("/api/runs", headers={"Origin": "http://localhost.evil.com"})
     assert "access-control-allow-origin" not in resp.headers

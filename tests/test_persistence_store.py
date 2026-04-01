@@ -237,6 +237,16 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
     store.close()  # should not raise
 
 
+def test_run_dir_rejects_path_traversal(store: Store) -> None:
+    with pytest.raises(PersistenceError, match="Invalid run_id"):
+        store.run_dir("../../etc")
+
+
+def test_delete_run_rejects_path_traversal(store: Store) -> None:
+    with pytest.raises(PersistenceError, match="Invalid run_id"):
+        store.delete_run("../../../etc")
+
+
 # --- Step results ---
 
 

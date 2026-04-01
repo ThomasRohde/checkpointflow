@@ -77,9 +77,18 @@ def test_switch_fails_when_no_case_and_no_default(run_ctx: Callable[..., RunCont
 
 def test_switch_deep_chain_no_recursion_error(tmp_path: Path) -> None:
     """Ensure a long chain of switch steps doesn't hit Python's recursion limit."""
-    # Build a chain of N switch steps where each jumps to the next.
-    # With recursion, N > recursion limit would crash.
-    n = sys.getrecursionlimit() + 50
+    # Temporarily lower the recursion limit so a smaller chain still proves
+    # that the iterative implementation works where recursion would fail.
+    original_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(100)
+    try:
+        n = 150
+        _run_deep_switch_chain(tmp_path, n)
+    finally:
+        sys.setrecursionlimit(original_limit)
+
+
+def _run_deep_switch_chain(tmp_path: Path, n: int) -> None:
     steps: list[dict[str, object]] = []
     for i in range(n):
         next_id = f"switch_{i + 1}" if i < n - 1 else "done"

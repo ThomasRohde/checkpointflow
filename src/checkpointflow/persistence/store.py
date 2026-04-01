@@ -281,10 +281,17 @@ class Store:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    @staticmethod
+    def _validate_run_id(run_id: str) -> None:
+        if ".." in run_id or "/" in run_id or "\\" in run_id:
+            msg = f"Invalid run_id: {run_id!r}"
+            raise PersistenceError(msg)
+
     def delete_run(self, run_id: str) -> None:
         """Delete a run and all associated data. Only terminal runs can be deleted."""
         import shutil
 
+        self._validate_run_id(run_id)
         run = self.get_run(run_id)
         if run is None:
             msg = f"Run not found: {run_id}"
@@ -307,6 +314,7 @@ class Store:
             shutil.rmtree(run_dir)
 
     def run_dir(self, run_id: str) -> Path:
+        self._validate_run_id(run_id)
         d = self.base_dir / "runs" / run_id
         for sub in ("stdout", "stderr", "artifacts"):
             (d / sub).mkdir(parents=True, exist_ok=True)

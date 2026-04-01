@@ -26,13 +26,13 @@ def query_status(
     with Store(base_dir=base_dir) as store:
         run = store.get_run(run_id)
 
-    if run is None:
-        return Envelope.failure(
-            command="status",
-            error_code=ErrorCode.ERR_RUN_NOT_FOUND,
-            message=f"Run not found: {run_id}",
-            exit_code=ExitCode.VALIDATION_ERROR,
-        )
+        if run is None:
+            return Envelope.failure(
+                command="status",
+                error_code=ErrorCode.ERR_RUN_NOT_FOUND,
+                message=f"Run not found: {run_id}",
+                exit_code=ExitCode.VALIDATION_ERROR,
+            )
 
     status: str = run["status"]
     exit_code = _status_to_exit_code(status)
