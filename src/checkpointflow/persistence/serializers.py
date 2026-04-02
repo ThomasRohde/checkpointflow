@@ -28,6 +28,7 @@ def serialize_event(ev: dict[str, Any]) -> dict[str, Any]:
     return {
         "event_name": ev["event_name"],
         "event_data": json.loads(ev["event_json"]),
+        "step_id": ev.get("step_id"),
         "created_at": ev["created_at"],
     }
 

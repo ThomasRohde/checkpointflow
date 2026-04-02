@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES runs(run_id),
+    step_id TEXT,
     event_name TEXT NOT NULL,
     event_json TEXT NOT NULL,
     validated INTEGER NOT NULL DEFAULT 1,
@@ -131,10 +132,16 @@ class Store:
     def _migrate(self) -> None:
         """Add columns that may be missing from older databases."""
         cursor = self._conn.execute("PRAGMA table_info(runs)")
-        existing = {row[1] for row in cursor.fetchall()}
+        run_cols = {row[1] for row in cursor.fetchall()}
         for col in ("workflow_name", "workflow_description"):
-            if col not in existing:
+            if col not in run_cols:
                 self._conn.execute(f"ALTER TABLE runs ADD COLUMN {col} TEXT")
+
+        cursor = self._conn.execute("PRAGMA table_info(events)")
+        event_cols = {row[1] for row in cursor.fetchall()}
+        if "step_id" not in event_cols:
+            self._conn.execute("ALTER TABLE events ADD COLUMN step_id TEXT")
+
         self._conn.commit()
 
     def _now(self) -> str:
@@ -276,13 +283,14 @@ class Store:
         run_id: str,
         event_name: str,
         event_json: str,
+        step_id: str | None = None,
     ) -> str:
         event_id = uuid.uuid4().hex
         self._conn.execute(
             """INSERT INTO events
-               (event_id, run_id, event_name, event_json, validated, created_at)
-               VALUES (?, ?, ?, ?, 1, ?)""",
-            (event_id, run_id, event_name, event_json, self._now()),
+               (event_id, run_id, step_id, event_name, event_json, validated, created_at)
+               VALUES (?, ?, ?, ?, ?, 1, ?)""",
+            (event_id, run_id, step_id, event_name, event_json, self._now()),
         )
         self._conn.commit()
         return event_id

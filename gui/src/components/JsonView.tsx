@@ -28,6 +28,8 @@ const useStyles = makeStyles({
     overflowX: "auto",
     maxHeight: "320px",
     margin: 0,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
   },
   copyBtn: {
     position: "absolute",

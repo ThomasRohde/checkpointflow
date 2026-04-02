@@ -49,6 +49,7 @@ export type StepKind = "cli" | "await_event" | "end" | string;
 export interface RunEvent {
   event_name: string;
   event_data: Record<string, unknown>;
+  step_id: string | null;
   created_at: string;
 }
 

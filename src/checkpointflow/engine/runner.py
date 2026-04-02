@@ -497,6 +497,7 @@ def _resume_inner_with_store(
         run_id=run_id,
         event_name=event_name,
         event_json=json.dumps(event_data),
+        step_id=run["current_step_id"],
     )
 
     # Reload workflow and verify integrity

@@ -1,6 +1,7 @@
-import { useState, useContext } from "react";
+import { useState, useContext, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
+  Badge,
   Button,
   Spinner,
   makeStyles,
@@ -23,7 +24,7 @@ import {
 } from "@fluentui/react-icons";
 import { Terminal, Pause, Flag, Circle } from "lucide-react";
 import { api } from "../lib/api";
-import type { StepResult, StepKind } from "../lib/types";
+import type { StepResult, StepKind, RunEvent } from "../lib/types";
 import { StatusBadge } from "./StatusBadge";
 import { JsonView } from "./JsonView";
 import { CopyButton } from "./CopyButton";
@@ -53,6 +54,45 @@ const kindColors: Record<string, { bg: string; text: string; border: string }> =
   };
 
 const defaultKindColor = { bg: "#fafafa", text: "#52525b", border: "#e4e4e7" };
+
+const decisionColors: Record<
+  string,
+  "success" | "warning" | "danger" | "brand" | "informative"
+> = {
+  approve: "success",
+  approved: "success",
+  publish: "brand",
+  published: "brand",
+  revise: "warning",
+  revised: "warning",
+  cancel: "danger",
+  cancelled: "danger",
+  reject: "danger",
+  rejected: "danger",
+};
+
+// --- Group events by step_id ---
+
+function groupEventsByStep(
+  events: RunEvent[],
+): { byStep: Map<string, RunEvent[]>; ungrouped: RunEvent[] } {
+  const byStep = new Map<string, RunEvent[]>();
+  const ungrouped: RunEvent[] = [];
+
+  for (const ev of events) {
+    if (ev.step_id) {
+      const list = byStep.get(ev.step_id) ?? [];
+      list.push(ev);
+      byStep.set(ev.step_id, list);
+    } else {
+      ungrouped.push(ev);
+    }
+  }
+
+  return { byStep, ungrouped };
+}
+
+// --- Styles ---
 
 const useStyles = makeStyles({
   root: {
@@ -243,49 +283,143 @@ const useStyles = makeStyles({
     margin: 0,
     position: "relative",
   },
-  eventCard: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: "12px",
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    padding: "16px",
-  },
-  eventHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "8px",
-  },
-  eventName: {
-    fontSize: "13px",
-    fontWeight: 500,
-    color: tokens.colorNeutralForeground1,
-  },
-  audienceBadge: {
-    fontSize: "10px",
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    padding: "2px 6px",
-    borderRadius: "9999px",
-    backgroundColor: tokens.colorNeutralBackground3,
-    color: tokens.colorNeutralForeground3,
-    fontWeight: 500,
-  },
   emptySteps: {
     fontSize: "13px",
     color: tokens.colorNeutralForeground4,
     textAlign: "center",
     padding: "16px 0",
   },
+  // Inline event styles
+  inlineEvents: {
+    marginTop: "8px",
+    marginLeft: "20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  inlineEventCard: {
+    borderLeft: "3px solid #fde68a",
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: "0 8px 8px 0",
+    padding: "10px 12px",
+  },
+  inlineEventHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "4px",
+  },
+  inlineEventName: {
+    fontSize: "12px",
+    fontWeight: 600,
+    color: tokens.colorNeutralForeground2,
+  },
+  inlineEventTime: {
+    fontSize: "11px",
+    color: tokens.colorNeutralForeground4,
+    marginLeft: "auto",
+  },
+  fieldLabel: {
+    fontSize: "11px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground4,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    marginBottom: "4px",
+    marginTop: "6px",
+  },
+  promptBlock: {
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontSize: "12px",
+    lineHeight: "1.6",
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: "6px",
+    padding: "10px 12px",
+    maxHeight: "200px",
+    overflowY: "auto",
+    color: tokens.colorNeutralForeground1,
+    margin: 0,
+  },
+  decisionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    marginTop: "4px",
+    marginBottom: "4px",
+  },
 });
+
+// --- Inline Event Card ---
+
+function InlineEventCard({ event }: { event: RunEvent }) {
+  const styles = useStyles();
+
+  const { audience, prompt, decision, ...rest } = event.event_data as Record<
+    string,
+    unknown
+  >;
+  const hasRest = Object.keys(rest).length > 0;
+
+  return (
+    <div className={styles.inlineEventCard}>
+      <div className={styles.inlineEventHeader}>
+        <span className={styles.inlineEventName}>{event.event_name}</span>
+        {audience != null && (
+          <Badge appearance="outline" size="small">
+            {String(audience)}
+          </Badge>
+        )}
+        <span className={styles.inlineEventTime}>
+          {timeAgo(event.created_at)}
+        </span>
+      </div>
+
+      {decision != null && (
+        <div className={styles.decisionRow}>
+          <span className={styles.fieldLabel} style={{ margin: 0 }}>
+            Decision
+          </span>
+          <Badge
+            appearance="filled"
+            color={
+              decisionColors[String(decision).toLowerCase()] ?? "informative"
+            }
+            size="small"
+          >
+            {String(decision)}
+          </Badge>
+        </div>
+      )}
+
+      {prompt != null && (
+        <div>
+          <div className={styles.fieldLabel}>Prompt</div>
+          <div className={styles.promptBlock}>{String(prompt)}</div>
+        </div>
+      )}
+
+      {hasRest && (
+        <div style={{ marginTop: 6 }}>
+          <JsonView data={rest} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Step Item ---
 
 function StepItem({
   step,
   runId,
   isLast,
+  events,
 }: {
   step: StepResult;
   runId: string;
   isLast: boolean;
+  events: RunEvent[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showStdout, setShowStdout] = useState(false);
@@ -387,6 +521,15 @@ function StepItem({
               )}
               {step.error_message}
             </div>
+          </div>
+        )}
+
+        {/* Inline events */}
+        {events.length > 0 && (
+          <div className={styles.inlineEvents}>
+            {events.map((ev, i) => (
+              <InlineEventCard key={i} event={ev} />
+            ))}
           </div>
         )}
 
@@ -501,6 +644,8 @@ function StepItem({
   );
 }
 
+// --- Main Component ---
+
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 export function RunDetail({
@@ -553,6 +698,21 @@ export function RunDetail({
     },
   });
 
+  const sortedSteps = useMemo(
+    () =>
+      run
+        ? [...run.step_results].sort(
+            (a, b) => a.execution_order - b.execution_order,
+          )
+        : [],
+    [run],
+  );
+
+  const { byStep: eventsByStep, ungrouped: ungroupedEvents } = useMemo(
+    () => groupEventsByStep(run?.events ?? []),
+    [run],
+  );
+
   if (isLoading) {
     return (
       <div className={styles.center}>
@@ -570,10 +730,6 @@ export function RunDetail({
   }
 
   if (!run) return null;
-
-  const sortedSteps = [...run.step_results].sort(
-    (a, b) => a.execution_order - b.execution_order,
-  );
 
   return (
     <div className={styles.root} style={{ overflowY: "auto", height: "100%" }}>
@@ -670,7 +826,7 @@ export function RunDetail({
         </div>
       )}
 
-      {/* Step timeline */}
+      {/* Step timeline with inline events */}
       <div className={styles.mb6}>
         <h2 className={styles.sectionTitle}>Step Execution</h2>
         <div className={styles.card}>
@@ -683,42 +839,20 @@ export function RunDetail({
                 step={step}
                 runId={run.run_id}
                 isLast={i === sortedSteps.length - 1}
+                events={eventsByStep.get(step.step_id) ?? []}
               />
             ))
           )}
         </div>
       </div>
 
-      {/* Events */}
-      {run.events && run.events.length > 0 && (
+      {/* Ungrouped events (legacy data without step_id) */}
+      {ungroupedEvents.length > 0 && (
         <div className={styles.mb6}>
           <h2 className={styles.sectionTitle}>Events</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {run.events.map((event, i) => (
-              <div key={i} className={styles.eventCard}>
-                <div className={styles.eventHeader}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className={styles.eventName}>
-                      {event.event_name}
-                    </span>
-                    {"audience" in event.event_data &&
-                      event.event_data.audience != null && (
-                        <span className={styles.audienceBadge}>
-                          {String(event.event_data.audience)}
-                        </span>
-                      )}
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: tokens.colorNeutralForeground4,
-                    }}
-                  >
-                    {timeAgo(event.created_at)}
-                  </span>
-                </div>
-                <JsonView data={event.event_data} />
-              </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {ungroupedEvents.map((event, i) => (
+              <InlineEventCard key={i} event={event} />
             ))}
           </div>
         </div>
