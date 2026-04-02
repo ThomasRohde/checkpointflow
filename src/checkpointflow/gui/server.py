@@ -17,6 +17,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from checkpointflow.gui.api import (
     bulk_delete_runs,
+    count_runs,
     delete_run,
     discover_workflows,
     get_run_detail,
@@ -31,7 +32,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 _SECURITY_HEADERS = [
     (b"x-content-type-options", b"nosniff"),
     (b"x-frame-options", b"DENY"),
-    (b"content-security-policy", b"default-src 'self'; script-src 'self' 'unsafe-inline'"),
+    (
+        b"content-security-policy",
+        b"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+    ),
 ]
 
 
@@ -123,7 +127,14 @@ def create_app(base_dir: Path | None = None) -> Starlette:
     store = Store(base_dir=resolved_base)
 
     async def api_runs(request: Request) -> Response:
-        return _json(list_runs(store))
+        page = int(request.query_params.get("page", "1"))
+        per_page = int(request.query_params.get("per_page", "50"))
+        page = max(1, page)
+        per_page = max(1, min(per_page, 200))
+        offset = (page - 1) * per_page
+        runs = list_runs(store, limit=per_page, offset=offset)
+        total = count_runs(store)
+        return _json({"runs": runs, "total": total, "page": page, "per_page": per_page})
 
     async def api_run_detail(request: Request) -> Response:
         run_id = request.path_params["run_id"]

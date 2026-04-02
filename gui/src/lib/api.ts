@@ -1,5 +1,5 @@
 import type {
-  RunSummary,
+  PaginatedRuns,
   RunDetail,
   WorkflowFile,
   WorkflowDetail,
@@ -24,8 +24,10 @@ async function fetchText(url: string): Promise<string> {
 }
 
 export const api = {
-  getRuns(): Promise<RunSummary[]> {
-    return fetchJSON<RunSummary[]>(`${BASE}/runs`);
+  getRuns(page = 1, perPage = 50): Promise<PaginatedRuns> {
+    return fetchJSON<PaginatedRuns>(
+      `${BASE}/runs?page=${page}&per_page=${perPage}`,
+    );
   },
 
   getRun(id: string): Promise<RunDetail> {

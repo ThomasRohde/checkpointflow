@@ -45,16 +45,42 @@ def _make_completed_run(store: Store) -> str:
 def test_api_runs_empty(client: TestClient) -> None:
     resp = client.get("/api/runs")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["runs"] == []
+    assert data["total"] == 0
 
 
-def test_api_runs_returns_list(client: TestClient, store: Store) -> None:
+def test_api_runs_returns_paginated(client: TestClient, store: Store) -> None:
     _make_completed_run(store)
     resp = client.get("/api/runs")
     assert resp.status_code == 200
     data = resp.json()
-    assert isinstance(data, list)
-    assert len(data) == 1
+    assert len(data["runs"]) == 1
+    assert data["total"] == 1
+    assert data["page"] == 1
+    assert data["per_page"] == 50
+
+
+def test_api_runs_pagination_params(client: TestClient, store: Store) -> None:
+    for _ in range(5):
+        _make_completed_run(store)
+    resp = client.get("/api/runs?page=2&per_page=2")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["runs"]) == 2
+    assert data["total"] == 5
+    assert data["page"] == 2
+    assert data["per_page"] == 2
+
+
+def test_api_runs_pagination_last_page(client: TestClient, store: Store) -> None:
+    for _ in range(3):
+        _make_completed_run(store)
+    resp = client.get("/api/runs?page=2&per_page=2")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["runs"]) == 1
+    assert data["total"] == 3
 
 
 # --- /api/runs/{run_id} ---

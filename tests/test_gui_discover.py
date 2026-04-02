@@ -18,6 +18,19 @@ workflow:
       command: echo hello
 """
 
+WORKFLOW_WITH_META = """\
+schema_version: checkpointflow/v1
+workflow:
+  id: meta-wf
+  name: Meta Workflow
+  version: "2.1.0"
+  description: A workflow with metadata
+  steps:
+    - id: s1
+      kind: cli
+      command: echo hello
+"""
+
 
 @pytest.fixture()
 def cwd_dir(tmp_path: Path) -> Path:
@@ -101,6 +114,40 @@ def test_discover_ignores_non_cpf_yaml(cwd_dir: Path, base_dir: Path) -> None:
         result = discover_workflows(base_dir)
 
     assert result == []
+
+
+def test_discover_includes_description_and_version(cwd_dir: Path, base_dir: Path) -> None:
+    """Discovery should include description and version from workflow YAML."""
+    from checkpointflow.gui.api import discover_workflows
+
+    cpf = cwd_dir / ".checkpointflow"
+    cpf.mkdir()
+    (cpf / "meta.yaml").write_text(WORKFLOW_WITH_META)
+
+    with patch("checkpointflow.gui.api.Path.cwd", return_value=cwd_dir):
+        result = discover_workflows(base_dir)
+
+    assert len(result) == 1
+    wf = result[0]
+    assert wf["description"] == "A workflow with metadata"
+    assert wf["version"] == "2.1.0"
+
+
+def test_discover_missing_description_returns_empty(cwd_dir: Path, base_dir: Path) -> None:
+    """Workflows without description/version should have empty string values."""
+    from checkpointflow.gui.api import discover_workflows
+
+    cpf = cwd_dir / ".checkpointflow"
+    cpf.mkdir()
+    (cpf / "minimal.yaml").write_text(MINIMAL_WORKFLOW)
+
+    with patch("checkpointflow.gui.api.Path.cwd", return_value=cwd_dir):
+        result = discover_workflows(base_dir)
+
+    assert len(result) == 1
+    wf = result[0]
+    assert wf["description"] == ""
+    assert wf["version"] == ""
 
 
 def test_discover_deduplicates(cwd_dir: Path) -> None:

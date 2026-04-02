@@ -14,9 +14,14 @@ from checkpointflow.persistence.serializers import serialize_event, serialize_st
 from checkpointflow.persistence.store import RunSummary, Store
 
 
-def list_runs(store: Store) -> list[RunSummary]:
-    """List all runs from the store."""
-    return store.list_runs()
+def list_runs(store: Store, *, limit: int | None = None, offset: int = 0) -> list[RunSummary]:
+    """List runs from the store with optional pagination."""
+    return store.list_runs(limit=limit, offset=offset)
+
+
+def count_runs(store: Store) -> int:
+    """Return the total number of runs."""
+    return store.count_runs()
 
 
 def get_run_detail(store: Store, run_id: str) -> dict[str, Any] | None:
@@ -101,6 +106,8 @@ def discover_workflows(base_dir: Path) -> list[dict[str, str]]:
                 "name": wf.path.stem,
                 "source": source,
                 "relative": wf.path.name,
+                "description": wf.description or "",
+                "version": wf.version or "",
             }
         )
     return results

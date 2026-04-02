@@ -9,6 +9,13 @@ export interface RunSummary {
   updated_at: string;
 }
 
+export interface PaginatedRuns {
+  runs: RunSummary[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
 export type RunStatus =
   | "running"
   | "completed"
@@ -50,6 +57,8 @@ export interface WorkflowFile {
   name: string;
   source: string;
   relative: string;
+  description?: string;
+  version?: string;
 }
 
 export interface WorkflowDetail {

@@ -182,14 +182,27 @@ class Store:
             return None
         return cast(RunRecord, dict(row))
 
-    def list_runs(self) -> list[RunSummary]:
-        """List all runs, ordered by creation time descending."""
-        cursor = self._conn.execute(
+    def list_runs(self, *, limit: int | None = None, offset: int = 0) -> list[RunSummary]:
+        """List runs, ordered by creation time descending.
+
+        When *limit* is given, return at most *limit* rows starting at *offset*.
+        """
+        sql = (
             "SELECT run_id, workflow_id, workflow_version, workflow_path, "
             "status, current_step_id, created_at, updated_at "
             "FROM runs ORDER BY created_at DESC"
         )
+        params: list[int] = []
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params = [limit, offset]
+        cursor = self._conn.execute(sql, params)
         return [cast(RunSummary, dict(row)) for row in cursor.fetchall()]
+
+    def count_runs(self) -> int:
+        """Return the total number of runs."""
+        cursor = self._conn.execute("SELECT COUNT(*) FROM runs")
+        return cast(int, cursor.fetchone()[0])
 
     def update_run(self, run_id: str, **kwargs: Any) -> None:
         if not kwargs:
