@@ -6,6 +6,7 @@ body {
     ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* background-color and color-scheme set dynamically by useTheme */
 }
 
 *:focus-visible {
@@ -21,11 +22,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d4d4d8;
+  background: light-dark(#d4d4d8, #52525b);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #a1a1aa;
+  background: light-dark(#a1a1aa, #71717a);
 }
 
 /* React Flow overrides */

@@ -110,6 +110,23 @@ function AppInner({
   const toastController = useToastController(toasterId);
   const styles = useStyles();
 
+  // Sync body background and dockview theme class with current theme
+  useEffect(() => {
+    document.body.style.backgroundColor = isDark ? "#1e1e1e" : "#fafafa";
+    document.body.style.colorScheme = isDark ? "dark" : "light";
+  }, [isDark]);
+
+  // Dockview className prop only applies on mount, so sync it imperatively
+  useEffect(() => {
+    const containers = document.querySelectorAll(
+      ".dockview-theme-abyss, .dockview-theme-light",
+    );
+    containers.forEach((el) => {
+      el.classList.remove("dockview-theme-abyss", "dockview-theme-light");
+      el.classList.add(dockviewClass);
+    });
+  }, [dockviewClass]);
+
   // Persist layout on changes
   useEffect(() => {
     if (!api) return;
