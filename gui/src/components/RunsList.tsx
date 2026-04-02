@@ -1,14 +1,47 @@
-import { useCallback, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { Activity, ArrowDown, ArrowUp, Loader2, Search, Trash2 } from "lucide-react";
+import { useCallback, useMemo, useState, useContext } from "react";
+import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import {
+  Button,
+  Input,
+  Checkbox,
+  Spinner,
+  makeStyles,
+  tokens,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogActions,
+  DialogContent,
+  Toast,
+  ToastBody,
+} from "@fluentui/react-components";
+import {
+  ArrowSortUpRegular,
+  ArrowSortDownRegular,
+  DeleteRegular,
+  SearchRegular,
+  ChevronLeftRegular,
+  ChevronRightRegular,
+} from "@fluentui/react-icons";
+import { Activity } from "lucide-react";
 import { api } from "../lib/api";
-import type { RunSummary } from "../lib/types";
+import type { PaginatedRuns, RunSummary } from "../lib/types";
 import { StatusBadge } from "./StatusBadge";
+import { CopyButton } from "./CopyButton";
 import { timeAgo } from "../lib/utils";
+import { usePanelNavigation } from "../hooks/usePanelNavigation";
+import { ToasterContext } from "../App";
 
-type SortKey = "workflow_id" | "status" | "current_step_id" | "created_at" | "updated_at";
+type SortKey =
+  | "workflow_id"
+  | "status"
+  | "current_step_id"
+  | "created_at"
+  | "updated_at";
 type SortDir = "asc" | "desc";
+
+const PER_PAGE = 50;
 
 function comparator(key: SortKey, dir: SortDir) {
   return (a: RunSummary, b: RunSummary) => {
@@ -19,59 +52,185 @@ function comparator(key: SortKey, dir: SortDir) {
   };
 }
 
-function SortHeader({
-  label,
-  sortKey,
-  activeKey,
-  dir,
-  onSort,
-}: {
-  label: string;
-  sortKey: SortKey;
-  activeKey: SortKey;
-  dir: SortDir;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = sortKey === activeKey;
-  return (
-    <th
-      className="text-left px-4 py-3 font-medium text-zinc-500 cursor-pointer select-none hover:text-zinc-700 transition-colors"
-      onClick={() => onSort(sortKey)}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        {active &&
-          (dir === "asc" ? (
-            <ArrowUp className="w-3 h-3" />
-          ) : (
-            <ArrowDown className="w-3 h-3" />
-          ))}
-      </span>
-    </th>
-  );
-}
+const useStyles = makeStyles({
+  root: {
+    padding: "24px",
+    maxWidth: "1200px",
+    marginLeft: "auto",
+    marginRight: "auto",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "24px",
+  },
+  titleGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  title: {
+    fontSize: "18px",
+    fontWeight: 600,
+    color: tokens.colorNeutralForeground1,
+    margin: 0,
+  },
+  total: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground4,
+  },
+  actions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontSize: "13px",
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: "8px",
+    overflow: "hidden",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  th: {
+    textAlign: "left",
+    padding: "12px 16px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground3,
+    cursor: "pointer",
+    userSelect: "none",
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+    "&:hover": {
+      color: tokens.colorNeutralForeground1,
+    },
+  },
+  thContent: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "4px",
+  },
+  checkboxTh: {
+    width: "40px",
+    padding: "12px",
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  row: {
+    cursor: "pointer",
+    borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
+    "&:hover": {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  td: {
+    padding: "12px 16px",
+  },
+  checkboxTd: {
+    width: "40px",
+    padding: "12px",
+  },
+  workflowName: {
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground1,
+  },
+  runId: {
+    display: "flex",
+    alignItems: "center",
+    gap: "2px",
+    fontSize: "11px",
+    color: tokens.colorNeutralForeground4,
+    fontFamily: "monospace",
+  },
+  mono: {
+    fontFamily: "monospace",
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground3,
+  },
+  time: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground3,
+  },
+  center: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "80px 0",
+  },
+  empty: {
+    textAlign: "center",
+    padding: "80px 0",
+    color: tokens.colorNeutralForeground4,
+  },
+  emptyIcon: {
+    width: "40px",
+    height: "40px",
+    margin: "0 auto 12px",
+    opacity: 0.4,
+  },
+  error: {
+    padding: "16px",
+    borderRadius: "8px",
+    border: `1px solid ${tokens.colorPaletteRedBorder2}`,
+    backgroundColor: tokens.colorPaletteRedBackground1,
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: "13px",
+  },
+  pagination: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: "16px",
+  },
+  pageInfo: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground4,
+  },
+  pageButtons: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+  },
+});
 
 export function RunsList() {
-  const navigate = useNavigate();
+  const { openRunDetail } = usePanelNavigation();
   const queryClient = useQueryClient();
-  const { data: runs, isLoading, error } = useQuery({
-    queryKey: ["runs"],
-    queryFn: api.getRuns,
+  const toastController = useContext(ToasterContext);
+  const styles = useStyles();
+  const [page, setPage] = useState(1);
+
+  const {
+    data: response,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["runs", page],
+    queryFn: () => api.getRuns(page, PER_PAGE),
     staleTime: 30_000,
   });
+
+  const runs = response?.runs;
+  const total = response?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir(key === "created_at" || key === "updated_at" ? "desc" : "asc");
+      setSortDir(
+        key === "created_at" || key === "updated_at" ? "desc" : "asc",
+      );
     }
   };
 
@@ -85,7 +244,7 @@ export function RunsList() {
           r.workflow_id.toLowerCase().includes(q) ||
           r.run_id.toLowerCase().includes(q) ||
           r.status.toLowerCase().includes(q) ||
-          (r.current_step_id ?? "").toLowerCase().includes(q)
+          (r.current_step_id ?? "").toLowerCase().includes(q),
       );
     }
     return [...result].sort(comparator(sortKey, sortDir));
@@ -113,142 +272,223 @@ export function RunsList() {
 
   const handleBulkDelete = useCallback(async () => {
     if (selected.size === 0) return;
-    const confirmed = window.confirm(
-      `Delete ${selected.size} run${selected.size > 1 ? "s" : ""}?`
-    );
-    if (!confirmed) return;
     setDeleting(true);
+
+    const queryKey: QueryKey = ["runs", page];
+    const previous = queryClient.getQueryData<PaginatedRuns>(queryKey);
+    if (previous) {
+      queryClient.setQueryData<PaginatedRuns>(queryKey, {
+        ...previous,
+        runs: previous.runs.filter((r) => !selected.has(r.run_id)),
+        total: previous.total - selected.size,
+      });
+    }
+
     try {
-      await api.bulkDeleteRuns([...selected]);
+      const result = await api.bulkDeleteRuns([...selected]);
+      const count = result.deleted.length;
+      toastController?.dispatchToast(
+        <Toast>
+          <ToastBody>
+            Deleted {count} run{count !== 1 ? "s" : ""}
+          </ToastBody>
+        </Toast>,
+        { intent: "success" },
+      );
       setSelected(new Set());
+      setConfirmBulkDelete(false);
       queryClient.invalidateQueries({ queryKey: ["runs"] });
+    } catch (err) {
+      if (previous) queryClient.setQueryData(queryKey, previous);
+      toastController?.dispatchToast(
+        <Toast>
+          <ToastBody>Delete failed: {(err as Error).message}</ToastBody>
+        </Toast>,
+        { intent: "error" },
+      );
     } finally {
       setDeleting(false);
     }
-  }, [selected, queryClient]);
+  }, [selected, queryClient, page, toastController]);
+
+  const SortIcon = sortDir === "asc" ? ArrowSortUpRegular : ArrowSortDownRegular;
+
+  function SortHeader({ label, k }: { label: string; k: SortKey }) {
+    return (
+      <th className={styles.th} onClick={() => handleSort(k)}>
+        <span className={styles.thContent}>
+          {label}
+          {sortKey === k && <SortIcon style={{ width: 12, height: 12 }} />}
+        </span>
+      </th>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Activity className="w-5 h-5 text-zinc-400" />
-          <h1 className="text-lg font-semibold text-zinc-900">Runs</h1>
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <div className={styles.titleGroup}>
+          <Activity style={{ width: 20, height: 20, color: "#a1a1aa" }} />
+          <h1 className={styles.title}>Runs</h1>
+          {total > 0 && <span className={styles.total}>{total} total</span>}
         </div>
-        <div className="flex items-center gap-3">
+        <div className={styles.actions}>
           {selected.size > 0 && (
-            <button
-              onClick={handleBulkDelete}
-              disabled={deleting}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
+            <Button
+              appearance="primary"
+              icon={<DeleteRegular />}
+              onClick={() => setConfirmBulkDelete(true)}
+              size="small"
             >
-              {deleting ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="w-3.5 h-3.5" />
-              )}
               Delete {selected.size}
-            </button>
+            </Button>
           )}
           {runs && runs.length > 0 && (
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-              <input
-                type="text"
-                placeholder="Search runs..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 pr-3 py-1.5 text-sm rounded-lg border border-zinc-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-300 w-64 transition-colors"
-              />
-            </div>
+            <Input
+              contentBefore={<SearchRegular />}
+              placeholder="Search runs..."
+              value={search}
+              onChange={(_, data) => setSearch(data.value)}
+              size="small"
+              style={{ width: 240 }}
+            />
           )}
         </div>
       </div>
 
+      <Dialog
+        open={confirmBulkDelete}
+        onOpenChange={(_, data) => setConfirmBulkDelete(data.open)}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Delete {selected.size} runs?</DialogTitle>
+            <DialogContent>
+              This action cannot be undone. The selected runs and their data will
+              be permanently removed.
+            </DialogContent>
+            <DialogActions>
+              <Button
+                appearance="secondary"
+                onClick={() => setConfirmBulkDelete(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={handleBulkDelete}
+                disabled={deleting}
+                icon={deleting ? <Spinner size="tiny" /> : undefined}
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
       {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
+        <div className={styles.center}>
+          <Spinner size="medium" />
         </div>
       )}
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className={styles.error}>
           Failed to load runs: {(error as Error).message}
         </div>
       )}
 
-      {runs && runs.length === 0 && (
-        <div className="text-center py-20 text-zinc-400">
-          <Activity className="w-10 h-10 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">No runs found</p>
-        </div>
-      )}
-
-      {runs && runs.length > 0 && filtered.length === 0 && (
-        <div className="text-center py-20 text-zinc-400">
-          <Search className="w-10 h-10 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">No runs match "{search}"</p>
+      {runs && runs.length === 0 && total === 0 && (
+        <div className={styles.empty}>
+          <Activity className={styles.emptyIcon} />
+          <p>No runs found</p>
         </div>
       )}
 
       {filtered.length > 0 && (
-        <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-sm">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-100 bg-zinc-50/50">
-                <th className="w-10 px-3 py-3">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500/20"
-                  />
-                </th>
-                <SortHeader label="Workflow" sortKey="workflow_id" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                <SortHeader label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                <SortHeader label="Current Step" sortKey="current_step_id" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                <SortHeader label="Created" sortKey="created_at" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                <SortHeader label="Updated" sortKey="updated_at" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((run) => (
-                <tr
-                  key={run.run_id}
-                  onClick={() => navigate(`/runs/${run.run_id}`)}
-                  className="border-b border-zinc-50 hover:bg-zinc-50 cursor-pointer transition-colors"
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th className={styles.checkboxTh}>
+                <Checkbox
+                  checked={allSelected ? true : selected.size > 0 ? "mixed" : false}
+                  onChange={toggleAll}
+                  aria-label="Select all runs"
+                />
+              </th>
+              <SortHeader label="Workflow" k="workflow_id" />
+              <SortHeader label="Status" k="status" />
+              <SortHeader label="Current Step" k="current_step_id" />
+              <SortHeader label="Created" k="created_at" />
+              <SortHeader label="Updated" k="updated_at" />
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((run) => (
+              <tr
+                key={run.run_id}
+                className={styles.row}
+                onClick={() => openRunDetail(run.run_id, run.workflow_id)}
+              >
+                <td
+                  className={styles.checkboxTd}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(run.run_id)}
-                      onChange={() => toggleOne(run.run_id)}
-                      className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500/20"
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-zinc-900">
-                      {run.workflow_id}
-                    </div>
-                    <div className="text-xs text-zinc-400 font-mono">
-                      {run.run_id.slice(0, 8)}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={run.status} />
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600 font-mono text-xs">
-                    {run.current_step_id ?? "-"}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-500 text-xs">
-                    {timeAgo(run.created_at)}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-500 text-xs">
-                    {timeAgo(run.updated_at)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  <Checkbox
+                    checked={selected.has(run.run_id)}
+                    onChange={() => toggleOne(run.run_id)}
+                    aria-label={`Select run ${run.run_id.slice(0, 8)}`}
+                  />
+                </td>
+                <td className={styles.td}>
+                  <div className={styles.workflowName}>{run.workflow_id}</div>
+                  <div className={styles.runId}>
+                    <span title={run.run_id}>{run.run_id.slice(0, 12)}</span>
+                    <CopyButton text={run.run_id} label="Copy run ID" />
+                  </div>
+                </td>
+                <td className={styles.td}>
+                  <StatusBadge status={run.status} />
+                </td>
+                <td className={`${styles.td} ${styles.mono}`}>
+                  {run.current_step_id ?? "-"}
+                </td>
+                <td className={`${styles.td} ${styles.time}`}>
+                  {timeAgo(run.created_at)}
+                </td>
+                <td className={`${styles.td} ${styles.time}`}>
+                  {timeAgo(run.updated_at)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {totalPages > 1 && (
+        <div className={styles.pagination}>
+          <span className={styles.pageInfo}>
+            Page {page} of {totalPages}
+          </span>
+          <div className={styles.pageButtons}>
+            <Button
+              appearance="subtle"
+              icon={<ChevronLeftRegular />}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              size="small"
+              aria-label="Previous page"
+            />
+            <Button
+              appearance="subtle"
+              icon={<ChevronRightRegular />}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              size="small"
+              aria-label="Next page"
+            />
+          </div>
         </div>
       )}
     </div>

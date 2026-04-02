@@ -1,26 +1,18 @@
-@import "tailwindcss";
-
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code",
-    monospace;
-
-  --color-sidebar: #0a0a0a;
-  --color-sidebar-hover: #1a1a1a;
-  --color-sidebar-active: #262626;
-  --color-sidebar-text: #a1a1aa;
-  --color-sidebar-text-active: #fafafa;
-}
+@import "dockview/dist/styles/dockview.css";
 
 body {
   margin: 0;
-  background: #fafafa;
-  color: #18181b;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter",
+    ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Scrollbar */
+*:focus-visible {
+  outline: 2px solid #0078d4;
+  outline-offset: 2px;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
