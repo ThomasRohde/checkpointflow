@@ -14,16 +14,30 @@ import {
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import dagre from "dagre";
+import ELK, { type ElkNode, type ElkExtendedEdge } from "elkjs/lib/elk.bundled.js";
 import {
   Button,
   Spinner,
   makeStyles,
   tokens,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Label,
+  Select,
+  SpinButton,
+  Switch,
+  type SpinButtonChangeEvent,
+  type SpinButtonOnChangeData,
 } from "@fluentui/react-components";
 import {
   ArrowSortRegular,
   DismissRegular,
+  SettingsRegular,
+  ArrowResetRegular,
 } from "@fluentui/react-icons";
 import { api } from "../lib/api";
 import type { WorkflowStep } from "../lib/types";
@@ -37,6 +51,8 @@ const nodeTypes = { stepNode: StepNode };
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 80;
 
+const elk = new ELK();
+
 const transitionColors = [
   "#3b82f6",
   "#8b5cf6",
@@ -48,30 +64,70 @@ const transitionColors = [
 
 type LayoutDirection = "TB" | "LR";
 
-function buildGraph(
-  steps: WorkflowStep[],
-  direction: LayoutDirection = "TB",
-): {
+const elkDirectionMap: Record<LayoutDirection, string> = {
+  TB: "DOWN",
+  LR: "RIGHT",
+};
+
+// --- ELK Layout Options ---
+
+export interface ElkLayoutOptions {
+  algorithm: "layered" | "mrtree" | "stress" | "force";
+  nodeSpacing: number;
+  layerSpacing: number;
+  nodePlacement: "NETWORK_SIMPLEX" | "BRANDES_KOEPFLER" | "LINEAR_SEGMENTS" | "SIMPLE";
+  crossingMinimization: "LAYER_SWEEP" | "INTERACTIVE";
+  edgeRouting: "ORTHOGONAL" | "POLYLINE" | "SPLINES";
+  mergeEdges: boolean;
+}
+
+const DEFAULT_ELK_OPTIONS: ElkLayoutOptions = {
+  algorithm: "layered",
+  nodeSpacing: 100,
+  layerSpacing: 100,
+  nodePlacement: "BRANDES_KOEPFLER",
+  crossingMinimization: "LAYER_SWEEP",
+  edgeRouting: "SPLINES",
+  mergeEdges: true,
+};
+
+const ELK_OPTIONS_KEY = "cpf_elk_layout_options";
+
+function loadElkOptions(): ElkLayoutOptions {
+  try {
+    const saved = localStorage.getItem(ELK_OPTIONS_KEY);
+    if (saved) return { ...DEFAULT_ELK_OPTIONS, ...JSON.parse(saved) };
+  } catch { /* ignore */ }
+  return { ...DEFAULT_ELK_OPTIONS };
+}
+
+function saveElkOptions(opts: ElkLayoutOptions) {
+  localStorage.setItem(ELK_OPTIONS_KEY, JSON.stringify(opts));
+}
+
+// --- Graph building ---
+
+function buildGraphData(steps: WorkflowStep[]): {
   nodes: StepNodeType[];
   edges: Edge[];
+  elkNodes: ElkNode["children"];
+  elkEdges: ElkExtendedEdge[];
 } {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: direction, nodesep: 80, ranksep: 80 });
-
   const nodes: StepNodeType[] = [];
   const edges: Edge[] = [];
+  const elkNodes: ElkNode["children"] = [];
+  const elkEdges: ElkExtendedEdge[] = [];
   let colorIdx = 0;
 
   for (const step of steps) {
     const id = step.id;
-    g.setNode(id, { width: NODE_WIDTH, height: NODE_HEIGHT });
     nodes.push({
       id,
       type: "stepNode",
       position: { x: 0, y: 0 },
       data: { step },
     });
+    elkNodes!.push({ id, width: NODE_WIDTH, height: NODE_HEIGHT });
   }
 
   function addBranchEdge(
@@ -82,7 +138,7 @@ function buildGraph(
     const color = transitionColors[colorIdx % transitionColors.length];
     colorIdx++;
     const edgeId = `br-${source}-${target}-${colorIdx}`;
-    g.setEdge(source, target);
+    elkEdges.push({ id: edgeId, sources: [source], targets: [target] });
     edges.push({
       id: edgeId,
       source,
@@ -122,7 +178,7 @@ function buildGraph(
 
     if (nextStep && !hasExplicitBranching) {
       const edgeId = `seq-${step.id}-${nextStep.id}`;
-      g.setEdge(step.id, nextStep.id);
+      elkEdges.push({ id: edgeId, sources: [step.id], targets: [nextStep.id] });
       edges.push({
         id: edgeId,
         source: step.id,
@@ -161,18 +217,57 @@ function buildGraph(
     }
   }
 
-  dagre.layout(g);
+  return { nodes, edges, elkNodes, elkEdges };
+}
 
-  for (const node of nodes) {
-    const pos = g.node(node.id);
-    node.position = {
-      x: pos.x - NODE_WIDTH / 2,
-      y: pos.y - NODE_HEIGHT / 2,
-    };
+async function applyElkLayout(
+  nodes: StepNodeType[],
+  elkNodes: ElkNode["children"],
+  elkEdges: ElkExtendedEdge[],
+  direction: LayoutDirection,
+  opts: ElkLayoutOptions,
+): Promise<StepNodeType[]> {
+  const layoutOptions: Record<string, string> = {
+    "elk.algorithm": opts.algorithm,
+    "elk.direction": elkDirectionMap[direction],
+    "elk.spacing.nodeNode": String(opts.nodeSpacing),
+  };
+
+  // Layered-specific options
+  if (opts.algorithm === "layered") {
+    layoutOptions["elk.layered.spacing.nodeNodeBetweenLayers"] = String(opts.layerSpacing);
+    layoutOptions["elk.layered.nodePlacement.strategy"] = opts.nodePlacement;
+    layoutOptions["elk.layered.crossingMinimization.strategy"] = opts.crossingMinimization;
+    layoutOptions["elk.edge.routing"] = opts.edgeRouting;
+    layoutOptions["elk.layered.mergeEdges"] = String(opts.mergeEdges);
   }
 
-  return { nodes, edges };
+  // mrtree-specific
+  if (opts.algorithm === "mrtree") {
+    layoutOptions["elk.spacing.nodeNode"] = String(opts.nodeSpacing);
+  }
+
+  const graph: ElkNode = {
+    id: "root",
+    layoutOptions,
+    children: elkNodes,
+    edges: elkEdges,
+  };
+
+  const layouted = await elk.layout(graph);
+
+  const positionMap = new Map<string, { x: number; y: number }>();
+  for (const child of layouted.children ?? []) {
+    positionMap.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 });
+  }
+
+  return nodes.map((node) => ({
+    ...node,
+    position: positionMap.get(node.id) ?? node.position,
+  }));
 }
+
+// --- Styles ---
 
 const useStyles = makeStyles({
   root: {
@@ -203,6 +298,11 @@ const useStyles = makeStyles({
     fontSize: "12px",
     color: tokens.colorNeutralForeground4,
     margin: 0,
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
   },
   graph: {
     flex: 1,
@@ -278,7 +378,198 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     fontSize: "13px",
   },
+  settingsRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+  },
+  settingsLabel: {
+    flex: 1,
+    fontSize: "13px",
+  },
+  settingsControl: {
+    width: "180px",
+    flexShrink: 0,
+  },
+  settingsGrid: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+  },
 });
+
+// --- Layout Settings Dialog ---
+
+function LayoutSettingsDialog({
+  open,
+  options,
+  onApply,
+  onClose,
+}: {
+  open: boolean;
+  options: ElkLayoutOptions;
+  onApply: (opts: ElkLayoutOptions) => void;
+  onClose: () => void;
+}) {
+  const styles = useStyles();
+  const [draft, setDraft] = useState<ElkLayoutOptions>(options);
+
+  // Sync draft when dialog opens
+  useEffect(() => {
+    if (open) setDraft(options);
+  }, [open, options]);
+
+  const update = <K extends keyof ElkLayoutOptions>(key: K, value: ElkLayoutOptions[K]) => {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSpinChange = (key: "nodeSpacing" | "layerSpacing") =>
+    (_e: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
+      if (data.value !== undefined && data.value !== null) {
+        update(key, data.value);
+      }
+    };
+
+  const isLayered = draft.algorithm === "layered";
+
+  return (
+    <Dialog open={open} onOpenChange={(_, data) => { if (!data.open) onClose(); }}>
+      <DialogSurface>
+        <DialogBody>
+          <DialogTitle>Layout Settings</DialogTitle>
+          <DialogContent>
+            <div className={styles.settingsGrid}>
+              <div className={styles.settingsRow}>
+                <Label className={styles.settingsLabel}>Algorithm</Label>
+                <Select
+                  className={styles.settingsControl}
+                  value={draft.algorithm}
+                  onChange={(_, data) =>
+                    update("algorithm", data.value as ElkLayoutOptions["algorithm"])
+                  }
+                >
+                  <option value="layered">Layered (best for DAGs)</option>
+                  <option value="mrtree">Tree</option>
+                  <option value="stress">Stress</option>
+                  <option value="force">Force</option>
+                </Select>
+              </div>
+
+              <div className={styles.settingsRow}>
+                <Label className={styles.settingsLabel}>Node spacing</Label>
+                <SpinButton
+                  className={styles.settingsControl}
+                  value={draft.nodeSpacing}
+                  min={10}
+                  max={200}
+                  step={10}
+                  onChange={handleSpinChange("nodeSpacing")}
+                />
+              </div>
+
+              {isLayered && (
+                <>
+                  <div className={styles.settingsRow}>
+                    <Label className={styles.settingsLabel}>Layer spacing</Label>
+                    <SpinButton
+                      className={styles.settingsControl}
+                      value={draft.layerSpacing}
+                      min={20}
+                      max={300}
+                      step={10}
+                      onChange={handleSpinChange("layerSpacing")}
+                    />
+                  </div>
+
+                  <div className={styles.settingsRow}>
+                    <Label className={styles.settingsLabel}>Node placement</Label>
+                    <Select
+                      className={styles.settingsControl}
+                      value={draft.nodePlacement}
+                      onChange={(_, data) =>
+                        update("nodePlacement", data.value as ElkLayoutOptions["nodePlacement"])
+                      }
+                    >
+                      <option value="NETWORK_SIMPLEX">Network Simplex</option>
+                      <option value="BRANDES_KOEPFLER">Brandes &amp; Köpfler</option>
+                      <option value="LINEAR_SEGMENTS">Linear Segments</option>
+                      <option value="SIMPLE">Simple</option>
+                    </Select>
+                  </div>
+
+                  <div className={styles.settingsRow}>
+                    <Label className={styles.settingsLabel}>Edge routing</Label>
+                    <Select
+                      className={styles.settingsControl}
+                      value={draft.edgeRouting}
+                      onChange={(_, data) =>
+                        update("edgeRouting", data.value as ElkLayoutOptions["edgeRouting"])
+                      }
+                    >
+                      <option value="ORTHOGONAL">Orthogonal</option>
+                      <option value="POLYLINE">Polyline</option>
+                      <option value="SPLINES">Splines</option>
+                    </Select>
+                  </div>
+
+                  <div className={styles.settingsRow}>
+                    <Label className={styles.settingsLabel}>Crossing minimization</Label>
+                    <Select
+                      className={styles.settingsControl}
+                      value={draft.crossingMinimization}
+                      onChange={(_, data) =>
+                        update(
+                          "crossingMinimization",
+                          data.value as ElkLayoutOptions["crossingMinimization"],
+                        )
+                      }
+                    >
+                      <option value="LAYER_SWEEP">Layer Sweep</option>
+                      <option value="INTERACTIVE">Interactive</option>
+                    </Select>
+                  </div>
+
+                  <div className={styles.settingsRow}>
+                    <Label className={styles.settingsLabel}>Merge edges</Label>
+                    <Switch
+                      checked={draft.mergeEdges}
+                      onChange={(_, data) => update("mergeEdges", data.checked)}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="subtle"
+              icon={<ArrowResetRegular />}
+              onClick={() => setDraft({ ...DEFAULT_ELK_OPTIONS })}
+            >
+              Reset
+            </Button>
+            <Button appearance="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              onClick={() => {
+                saveElkOptions(draft);
+                onApply(draft);
+                onClose();
+              }}
+            >
+              Apply
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+  );
+}
+
+// --- Step Detail Panel ---
 
 function StepDetailPanel({
   step,
@@ -405,6 +696,8 @@ function StepDetailPanel({
   );
 }
 
+// --- Main Component ---
+
 function WorkflowGraphInner({ workflowPath }: { workflowPath: string }) {
   const styles = useStyles();
 
@@ -421,23 +714,44 @@ function WorkflowGraphInner({ workflowPath }: { workflowPath: string }) {
 
   const { fitView } = useReactFlow();
   const [direction, setDirection] = useState<LayoutDirection>("TB");
+  const [elkOptions, setElkOptions] = useState<ElkLayoutOptions>(loadElkOptions);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const graphData = useMemo(() => {
     if (!workflow?.steps) return null;
-    return buildGraph(workflow.steps, direction);
-  }, [workflow, direction]);
+    return buildGraphData(workflow.steps);
+  }, [workflow]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<StepNodeType>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
+  const [layouting, setLayouting] = useState(false);
 
+  // Run ELK layout when graph data, direction, or options change
   useEffect(() => {
-    if (graphData) {
-      setNodes(graphData.nodes);
+    if (!graphData) return;
+
+    let cancelled = false;
+    setLayouting(true);
+
+    applyElkLayout(
+      graphData.nodes,
+      graphData.elkNodes,
+      graphData.elkEdges,
+      direction,
+      elkOptions,
+    ).then((layoutedNodes) => {
+      if (cancelled) return;
+      setNodes(layoutedNodes);
       setEdges(graphData.edges);
-      setTimeout(() => fitView({ padding: 0.2 }), 100);
-    }
-  }, [graphData, setNodes, setEdges, fitView]);
+      setLayouting(false);
+      setTimeout(() => fitView({ padding: 0.2 }), 50);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [graphData, direction, elkOptions, setNodes, setEdges, fitView]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: StepNodeType) => {
@@ -490,39 +804,61 @@ function WorkflowGraphInner({ workflowPath }: { workflowPath: string }) {
             {workflow.description ? ` — ${workflow.description}` : ""}
           </p>
         </div>
-        <Button
-          appearance="subtle"
-          size="small"
-          icon={<ArrowSortRegular />}
-          onClick={() => setDirection((d) => (d === "TB" ? "LR" : "TB"))}
-          title={
-            direction === "TB"
-              ? "Switch to horizontal layout"
-              : "Switch to vertical layout"
-          }
-        >
-          {direction === "TB" ? "Horizontal" : "Vertical"}
-        </Button>
+        <div className={styles.headerActions}>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<ArrowSortRegular />}
+            onClick={() => setDirection((d) => (d === "TB" ? "LR" : "TB"))}
+            title={
+              direction === "TB"
+                ? "Switch to horizontal layout"
+                : "Switch to vertical layout"
+            }
+          >
+            {direction === "TB" ? "Horizontal" : "Vertical"}
+          </Button>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<SettingsRegular />}
+            onClick={() => setSettingsOpen(true)}
+            title="Layout settings"
+          />
+        </div>
       </div>
 
+      <LayoutSettingsDialog
+        open={settingsOpen}
+        options={elkOptions}
+        onApply={setElkOptions}
+        onClose={() => setSettingsOpen(false)}
+      />
+
       <div className={styles.graph}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodeClick={onNodeClick}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          minZoom={0.3}
-          maxZoom={2}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background color="#e4e4e7" gap={20} size={1} />
-          <Controls showInteractive={false} />
-          <MiniMap nodeColor="#d4d4d8" maskColor="rgba(250, 250, 250, 0.7)" />
-        </ReactFlow>
+        {layouting ? (
+          <div className={styles.center}>
+            <Spinner size="small" />
+          </div>
+        ) : (
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onNodeClick={onNodeClick}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.3}
+            maxZoom={2}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background color="#e4e4e7" gap={20} size={1} />
+            <Controls showInteractive={false} />
+            <MiniMap nodeColor="#d4d4d8" maskColor="rgba(250, 250, 250, 0.7)" />
+          </ReactFlow>
+        )}
 
         {selectedStep && (
           <StepDetailPanel step={selectedStep} onClose={handleClosePanel} />
