@@ -1,44 +1,21 @@
-import { cn } from "../lib/utils";
+import { Badge } from "@fluentui/react-components";
 import type { RunStatus } from "../lib/types";
 
-const statusStyles: Record<RunStatus, string> = {
-  completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  running: "bg-blue-50 text-blue-700 border-blue-200",
-  waiting: "bg-amber-50 text-amber-700 border-amber-200",
-  failed: "bg-red-50 text-red-700 border-red-200",
-  cancelled: "bg-zinc-100 text-zinc-500 border-zinc-200",
+const colorMap: Record<
+  RunStatus,
+  "success" | "brand" | "warning" | "danger" | "informative"
+> = {
+  completed: "success",
+  running: "brand",
+  waiting: "warning",
+  failed: "danger",
+  cancelled: "informative",
 };
 
-const statusDot: Record<RunStatus, string> = {
-  completed: "bg-emerald-500",
-  running: "bg-blue-500",
-  waiting: "bg-amber-500",
-  failed: "bg-red-500",
-  cancelled: "bg-zinc-400",
-};
-
-export function StatusBadge({
-  status,
-  className,
-}: {
-  status: RunStatus;
-  className?: string;
-}) {
+export function StatusBadge({ status }: { status: RunStatus }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border",
-        statusStyles[status] ?? "bg-zinc-100 text-zinc-500 border-zinc-200",
-        className
-      )}
-    >
-      <span
-        className={cn(
-          "w-1.5 h-1.5 rounded-full",
-          statusDot[status] ?? "bg-zinc-400"
-        )}
-      />
+    <Badge appearance="filled" color={colorMap[status] ?? "informative"}>
       {status}
-    </span>
+    </Badge>
   );
 }

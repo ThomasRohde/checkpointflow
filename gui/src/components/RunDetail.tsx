@@ -1,43 +1,282 @@
-import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useState, useContext } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronRight,
-  Terminal,
-  Pause,
-  Flag,
-  Circle,
-  Loader2,
-  FileText,
-  AlertTriangle,
-  Trash2,
-} from "lucide-react";
+  Button,
+  Spinner,
+  makeStyles,
+  tokens,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogActions,
+  DialogContent,
+  Toast,
+  ToastBody,
+} from "@fluentui/react-components";
+import {
+  ChevronDownRegular,
+  ChevronRightRegular,
+  DeleteRegular,
+  DocumentTextRegular,
+  WarningRegular,
+} from "@fluentui/react-icons";
+import { Terminal, Pause, Flag, Circle } from "lucide-react";
 import { api } from "../lib/api";
 import type { StepResult, StepKind } from "../lib/types";
 import { StatusBadge } from "./StatusBadge";
 import { JsonView } from "./JsonView";
-import { cn, timeAgo, formatDuration } from "../lib/utils";
+import { CopyButton } from "./CopyButton";
+import { timeAgo, formatDuration } from "../lib/utils";
+import { ToasterContext } from "../App";
+import type { DockviewPanelApi } from "dockview";
 
 function StepKindIcon({ kind }: { kind: StepKind }) {
+  const s = { width: 16, height: 16 };
   switch (kind) {
     case "cli":
-      return <Terminal className="w-4 h-4" />;
+      return <Terminal style={s} />;
     case "await_event":
-      return <Pause className="w-4 h-4" />;
+      return <Pause style={s} />;
     case "end":
-      return <Flag className="w-4 h-4" />;
+      return <Flag style={s} />;
     default:
-      return <Circle className="w-4 h-4" />;
+      return <Circle style={s} />;
   }
 }
 
-const kindColors: Record<string, string> = {
-  cli: "bg-blue-50 text-blue-700 border-blue-200",
-  await_event: "bg-amber-50 text-amber-700 border-amber-200",
-  end: "bg-emerald-50 text-emerald-700 border-emerald-200",
-};
+const kindColors: Record<string, { bg: string; text: string; border: string }> =
+  {
+    cli: { bg: "#eff6ff", text: "#1e40af", border: "#bfdbfe" },
+    await_event: { bg: "#fffbeb", text: "#92400e", border: "#fde68a" },
+    end: { bg: "#ecfdf5", text: "#065f46", border: "#a7f3d0" },
+  };
+
+const defaultKindColor = { bg: "#fafafa", text: "#52525b", border: "#e4e4e7" };
+
+const useStyles = makeStyles({
+  root: {
+    padding: "24px",
+    maxWidth: "900px",
+    marginLeft: "auto",
+    marginRight: "auto",
+  },
+  card: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: "12px",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    padding: "20px",
+    marginBottom: "24px",
+  },
+  cardHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: "12px",
+  },
+  title: {
+    fontSize: "18px",
+    fontWeight: 600,
+    color: tokens.colorNeutralForeground1,
+    margin: 0,
+  },
+  version: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground4,
+    marginTop: "2px",
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  metaGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: "16px",
+    fontSize: "13px",
+  },
+  metaLabel: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground4,
+    marginBottom: "2px",
+  },
+  metaValue: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground2,
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    fontFamily: "monospace",
+  },
+  sectionTitle: {
+    fontSize: "13px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground2,
+    marginBottom: "16px",
+    margin: 0,
+  },
+  sectionToggle: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "13px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground2,
+    cursor: "pointer",
+    border: "none",
+    backgroundColor: "transparent",
+    padding: 0,
+  },
+  mb6: {
+    marginBottom: "24px",
+  },
+  center: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+  },
+  error: {
+    padding: "16px",
+    borderRadius: "8px",
+    border: `1px solid ${tokens.colorPaletteRedBorder2}`,
+    backgroundColor: tokens.colorPaletteRedBackground1,
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: "13px",
+    margin: "24px",
+  },
+  timeline: {
+    display: "flex",
+    gap: "12px",
+  },
+  timelineTrack: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  timelineIcon: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  timelineLine: {
+    width: "1px",
+    flex: 1,
+    backgroundColor: tokens.colorNeutralStroke2,
+    marginTop: "4px",
+    marginBottom: "4px",
+  },
+  stepContent: {
+    flex: 1,
+    paddingBottom: "24px",
+  },
+  stepHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    width: "100%",
+    border: "none",
+    backgroundColor: "transparent",
+    padding: 0,
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  stepName: {
+    fontWeight: 500,
+    fontSize: "13px",
+    color: tokens.colorNeutralForeground1,
+  },
+  stepKindBadge: {
+    fontSize: "11px",
+    padding: "2px 6px",
+    borderRadius: "4px",
+    fontWeight: 500,
+  },
+  exitCode: {
+    fontSize: "12px",
+    fontFamily: "monospace",
+  },
+  stepTime: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground4,
+    marginLeft: "auto",
+  },
+  stepError: {
+    marginTop: "8px",
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "8px",
+    padding: "8px",
+    borderRadius: "6px",
+    backgroundColor: tokens.colorPaletteRedBackground1,
+    border: `1px solid ${tokens.colorPaletteRedBorder2}`,
+  },
+  stepErrorText: {
+    fontSize: "12px",
+    color: tokens.colorPaletteRedForeground1,
+  },
+  expanded: {
+    marginTop: "12px",
+    marginLeft: "20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  outputLabel: {
+    fontSize: "12px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground3,
+    marginBottom: "4px",
+  },
+  stdPre: {
+    fontSize: "12px",
+    fontFamily: "monospace",
+    borderRadius: "8px",
+    padding: "12px",
+    overflowX: "auto",
+    maxHeight: "240px",
+    margin: 0,
+    position: "relative",
+  },
+  eventCard: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: "12px",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    padding: "16px",
+  },
+  eventHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "8px",
+  },
+  eventName: {
+    fontSize: "13px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground1,
+  },
+  audienceBadge: {
+    fontSize: "10px",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    padding: "2px 6px",
+    borderRadius: "9999px",
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: 500,
+  },
+  emptySteps: {
+    fontSize: "13px",
+    color: tokens.colorNeutralForeground4,
+    textAlign: "center",
+    padding: "16px 0",
+  },
+});
 
 function StepItem({
   step,
@@ -51,6 +290,7 @@ function StepItem({
   const [expanded, setExpanded] = useState(false);
   const [showStdout, setShowStdout] = useState(false);
   const [showStderr, setShowStderr] = useState(false);
+  const styles = useStyles();
 
   const stdoutQuery = useQuery({
     queryKey: ["stdout", runId, step.step_id],
@@ -66,72 +306,82 @@ function StepItem({
     staleTime: 60_000,
   });
 
-  const hasFailed =
-    step.exit_code !== null && step.exit_code !== 0;
+  const hasFailed = step.exit_code !== null && step.exit_code !== 0;
   const hasError = step.error_code !== null;
+  const hasExpandableContent =
+    (step.outputs && Object.keys(step.outputs).length > 0) ||
+    step.stdout_path !== null ||
+    step.stderr_path !== null;
+
+  const kc = kindColors[step.step_kind] ?? defaultKindColor;
 
   return (
-    <div className="flex gap-3">
-      {/* Timeline line */}
-      <div className="flex flex-col items-center">
+    <div className={styles.timeline}>
+      <div className={styles.timelineTrack}>
         <div
-          className={cn(
-            "w-8 h-8 rounded-full flex items-center justify-center shrink-0 border",
-            hasFailed || hasError
-              ? "bg-red-50 text-red-600 border-red-200"
-              : kindColors[step.step_kind] ??
-                  "bg-zinc-50 text-zinc-500 border-zinc-200"
-          )}
+          className={styles.timelineIcon}
+          style={{
+            backgroundColor: hasFailed || hasError ? "#fef2f2" : kc.bg,
+            color: hasFailed || hasError ? "#dc2626" : kc.text,
+            border: `1px solid ${hasFailed || hasError ? "#fecaca" : kc.border}`,
+          }}
         >
           <StepKindIcon kind={step.step_kind} />
         </div>
-        {!isLast && <div className="w-px flex-1 bg-zinc-200 my-1" />}
+        {!isLast && <div className={styles.timelineLine} />}
       </div>
 
-      {/* Step content */}
-      <div className={cn("flex-1 pb-4", isLast ? "" : "pb-6")}>
+      <div className={styles.stepContent}>
         <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-2 w-full text-left group"
+          onClick={() => hasExpandableContent && setExpanded(!expanded)}
+          className={styles.stepHeader}
+          style={{ cursor: hasExpandableContent ? "pointer" : "default" }}
         >
-          {expanded ? (
-            <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+          {hasExpandableContent ? (
+            expanded ? (
+              <ChevronDownRegular style={{ width: 14, height: 14 }} />
+            ) : (
+              <ChevronRightRegular style={{ width: 14, height: 14 }} />
+            )
           ) : (
-            <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
+            <span style={{ width: 14, height: 14, flexShrink: 0 }} />
           )}
-          <span className="font-medium text-sm text-zinc-900">
-            {step.step_id}
-          </span>
+          <span className={styles.stepName}>{step.step_id}</span>
           <span
-            className={cn(
-              "text-xs px-1.5 py-0.5 rounded border font-medium",
-              kindColors[step.step_kind] ??
-                "bg-zinc-50 text-zinc-500 border-zinc-200"
-            )}
+            className={styles.stepKindBadge}
+            style={{
+              backgroundColor: kc.bg,
+              color: kc.text,
+              border: `1px solid ${kc.border}`,
+            }}
           >
             {step.step_kind}
           </span>
           {step.exit_code !== null && (
             <span
-              className={cn(
-                "text-xs font-mono",
-                hasFailed ? "text-red-600" : "text-zinc-400"
-              )}
+              className={styles.exitCode}
+              style={{ color: hasFailed ? "#dc2626" : "#a1a1aa" }}
             >
               exit {step.exit_code}
             </span>
           )}
-          <span className="text-xs text-zinc-400 ml-auto">
-            {timeAgo(step.created_at)}
-          </span>
+          <span className={styles.stepTime}>{timeAgo(step.created_at)}</span>
         </button>
 
         {(hasFailed || hasError) && step.error_message && (
-          <div className="mt-2 flex items-start gap-2 p-2 rounded-md bg-red-50 border border-red-200">
-            <AlertTriangle className="w-3.5 h-3.5 text-red-500 mt-0.5 shrink-0" />
-            <div className="text-xs text-red-700">
+          <div className={styles.stepError}>
+            <WarningRegular
+              style={{
+                width: 14,
+                height: 14,
+                color: "#dc2626",
+                marginTop: 2,
+                flexShrink: 0,
+              }}
+            />
+            <div className={styles.stepErrorText}>
               {step.error_code && (
-                <span className="font-mono font-medium">
+                <span style={{ fontFamily: "monospace", fontWeight: 500 }}>
                   [{step.error_code}]{" "}
                 </span>
               )}
@@ -141,68 +391,104 @@ function StepItem({
         )}
 
         {expanded && (
-          <div className="mt-3 space-y-3 ml-5">
-            {/* Outputs */}
-            {step.outputs &&
-              Object.keys(step.outputs).length > 0 && (
-                <div>
-                  <div className="text-xs font-medium text-zinc-500 mb-1">
-                    Outputs
-                  </div>
-                  <JsonView data={step.outputs} />
-                </div>
-              )}
+          <div className={styles.expanded}>
+            {step.outputs && Object.keys(step.outputs).length > 0 && (
+              <div>
+                <div className={styles.outputLabel}>Outputs</div>
+                <JsonView data={step.outputs} />
+              </div>
+            )}
 
-            {/* Stdout */}
             {step.stdout_path && (
               <div>
-                <button
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<DocumentTextRegular />}
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowStdout(!showStdout);
                   }}
-                  className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium"
                 >
-                  <FileText className="w-3 h-3" />
                   {showStdout ? "Hide" : "Show"} stdout
-                </button>
+                </Button>
                 {showStdout && (
-                  <div className="mt-1">
-                    {stdoutQuery.isLoading && (
-                      <Loader2 className="w-3 h-3 animate-spin text-zinc-400" />
-                    )}
+                  <div style={{ marginTop: 4 }}>
+                    {stdoutQuery.isLoading && <Spinner size="tiny" />}
                     {stdoutQuery.data !== undefined && (
-                      <pre className="text-xs font-mono bg-zinc-900 text-zinc-100 rounded-lg p-3 overflow-auto max-h-60">
-                        {stdoutQuery.data || "(empty)"}
-                      </pre>
+                      <div style={{ position: "relative" }}>
+                        <pre
+                          className={styles.stdPre}
+                          style={{
+                            backgroundColor: "#18181b",
+                            color: "#f4f4f5",
+                          }}
+                        >
+                          {stdoutQuery.data || "(empty)"}
+                        </pre>
+                        {stdoutQuery.data && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 8,
+                              right: 8,
+                            }}
+                          >
+                            <CopyButton
+                              text={stdoutQuery.data}
+                              label="Copy stdout"
+                            />
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
               </div>
             )}
 
-            {/* Stderr */}
             {step.stderr_path && (
               <div>
-                <button
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<WarningRegular />}
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowStderr(!showStderr);
                   }}
-                  className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-800 font-medium"
                 >
-                  <AlertTriangle className="w-3 h-3" />
                   {showStderr ? "Hide" : "Show"} stderr
-                </button>
+                </Button>
                 {showStderr && (
-                  <div className="mt-1">
-                    {stderrQuery.isLoading && (
-                      <Loader2 className="w-3 h-3 animate-spin text-zinc-400" />
-                    )}
+                  <div style={{ marginTop: 4 }}>
+                    {stderrQuery.isLoading && <Spinner size="tiny" />}
                     {stderrQuery.data !== undefined && (
-                      <pre className="text-xs font-mono bg-red-950 text-red-200 rounded-lg p-3 overflow-auto max-h-60">
-                        {stderrQuery.data || "(empty)"}
-                      </pre>
+                      <div style={{ position: "relative" }}>
+                        <pre
+                          className={styles.stdPre}
+                          style={{
+                            backgroundColor: "#1c0a0a",
+                            color: "#fca5a5",
+                          }}
+                        >
+                          {stderrQuery.data || "(empty)"}
+                        </pre>
+                        {stderrQuery.data && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 8,
+                              right: 8,
+                            }}
+                          >
+                            <CopyButton
+                              text={stderrQuery.data}
+                              label="Copy stderr"
+                            />
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -217,18 +503,38 @@ function StepItem({
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
-export function RunDetail() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+export function RunDetail({
+  runId,
+  panelApi,
+}: {
+  runId: string;
+  panelApi: DockviewPanelApi;
+}) {
   const queryClient = useQueryClient();
-  const [showInputs, setShowInputs] = useState(false);
+  const toastController = useContext(ToasterContext);
+  const styles = useStyles();
+  const [showInputs, setShowInputs] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.deleteRun(id!),
+    mutationFn: () => api.deleteRun(runId),
     onSuccess: () => {
+      toastController?.dispatchToast(
+        <Toast>
+          <ToastBody>Run deleted</ToastBody>
+        </Toast>,
+        { intent: "success" },
+      );
       queryClient.invalidateQueries({ queryKey: ["runs"] });
-      navigate("/");
+      panelApi.close();
+    },
+    onError: (err: Error) => {
+      toastController?.dispatchToast(
+        <Toast>
+          <ToastBody>Delete failed: {err.message}</ToastBody>
+        </Toast>,
+        { intent: "error" },
+      );
     },
   });
 
@@ -237,9 +543,8 @@ export function RunDetail() {
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["run", id],
-    queryFn: () => api.getRun(id!),
-    enabled: !!id,
+    queryKey: ["run", runId],
+    queryFn: () => api.getRun(runId),
     staleTime: 5_000,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
@@ -250,18 +555,16 @@ export function RunDetail() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
+      <div className={styles.center}>
+        <Spinner size="medium" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-6">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          Failed to load run: {(error as Error).message}
-        </div>
+      <div className={styles.error}>
+        Failed to load run: {(error as Error).message}
       </div>
     );
   }
@@ -269,107 +572,98 @@ export function RunDetail() {
   if (!run) return null;
 
   const sortedSteps = [...run.step_results].sort(
-    (a, b) => a.execution_order - b.execution_order
+    (a, b) => a.execution_order - b.execution_order,
   );
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      {/* Back link */}
-      <Link
-        to="/"
-        className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900 mb-4 transition-colors"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        All Runs
-      </Link>
-
+    <div className={styles.root} style={{ overflowY: "auto", height: "100%" }}>
       {/* Header card */}
-      <div className="bg-white rounded-xl border border-zinc-200 p-5 mb-6 shadow-sm">
-        <div className="flex items-start justify-between mb-3">
+      <div className={styles.card}>
+        <div className={styles.cardHeader}>
           <div>
-            <h1 className="text-lg font-semibold text-zinc-900">
-              {run.workflow_id}
-            </h1>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Version {run.workflow_version}
-            </p>
+            <h1 className={styles.title}>{run.workflow_id}</h1>
+            <p className={styles.version}>Version {run.workflow_version}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className={styles.headerActions}>
             <StatusBadge status={run.status} />
             {TERMINAL_STATUSES.has(run.status) && (
-              <>
-                {confirmDelete ? (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => deleteMutation.mutate()}
-                      disabled={deleteMutation.isPending}
-                      className="px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors disabled:opacity-50"
-                    >
-                      {deleteMutation.isPending ? "Deleting..." : "Confirm"}
-                    </button>
-                    <button
-                      onClick={() => setConfirmDelete(false)}
-                      className="px-2 py-1 text-xs font-medium text-zinc-600 bg-zinc-100 hover:bg-zinc-200 rounded-md transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDelete(true)}
-                    className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                    title="Delete run"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-                {deleteMutation.isError && (
-                  <span className="text-xs text-red-600">
-                    {(deleteMutation.error as Error).message}
-                  </span>
-                )}
-              </>
+              <Button
+                appearance="subtle"
+                icon={<DeleteRegular />}
+                onClick={() => setConfirmDelete(true)}
+                title="Delete run"
+                size="small"
+              />
             )}
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-4 text-sm">
+        <div className={styles.metaGrid}>
           <div>
-            <div className="text-xs text-zinc-400 mb-0.5">Run ID</div>
-            <div className="font-mono text-xs text-zinc-700">
-              {run.run_id}
+            <div className={styles.metaLabel}>Run ID</div>
+            <div className={styles.metaValue}>
+              {runId}
+              <CopyButton text={runId} label="Copy run ID" />
             </div>
           </div>
           <div>
-            <div className="text-xs text-zinc-400 mb-0.5">Created</div>
-            <div className="text-xs text-zinc-700">
-              {timeAgo(run.created_at)}
-            </div>
+            <div className={styles.metaLabel}>Created</div>
+            <div className={styles.metaValue}>{timeAgo(run.created_at)}</div>
           </div>
           <div>
-            <div className="text-xs text-zinc-400 mb-0.5">Duration</div>
-            <div className="text-xs text-zinc-700">
+            <div className={styles.metaLabel}>Duration</div>
+            <div className={styles.metaValue}>
               {formatDuration(run.created_at, run.updated_at)}
             </div>
           </div>
         </div>
       </div>
 
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(_, data) => setConfirmDelete(data.open)}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Delete this run?</DialogTitle>
+            <DialogContent>
+              This action cannot be undone. The run and all its data will be
+              permanently removed.
+            </DialogContent>
+            <DialogActions>
+              <Button
+                appearance="secondary"
+                onClick={() => setConfirmDelete(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
       {/* Inputs */}
       {run.inputs && Object.keys(run.inputs).length > 0 && (
-        <div className="mb-6">
+        <div className={styles.mb6}>
           <button
             onClick={() => setShowInputs(!showInputs)}
-            className="flex items-center gap-2 text-sm font-medium text-zinc-700 hover:text-zinc-900"
+            className={styles.sectionToggle}
           >
             {showInputs ? (
-              <ChevronDown className="w-3.5 h-3.5" />
+              <ChevronDownRegular style={{ width: 14, height: 14 }} />
             ) : (
-              <ChevronRight className="w-3.5 h-3.5" />
+              <ChevronRightRegular style={{ width: 14, height: 14 }} />
             )}
             Inputs
           </button>
           {showInputs && (
-            <div className="mt-2">
+            <div style={{ marginTop: 8 }}>
               <JsonView data={run.inputs} />
             </div>
           )}
@@ -377,15 +671,11 @@ export function RunDetail() {
       )}
 
       {/* Step timeline */}
-      <div className="mb-6">
-        <h2 className="text-sm font-medium text-zinc-700 mb-4">
-          Step Execution
-        </h2>
-        <div className="bg-white rounded-xl border border-zinc-200 p-5 shadow-sm">
+      <div className={styles.mb6}>
+        <h2 className={styles.sectionTitle}>Step Execution</h2>
+        <div className={styles.card}>
           {sortedSteps.length === 0 ? (
-            <p className="text-sm text-zinc-400 text-center py-4">
-              No steps executed yet
-            </p>
+            <p className={styles.emptySteps}>No steps executed yet</p>
           ) : (
             sortedSteps.map((step, i) => (
               <StepItem
@@ -401,19 +691,29 @@ export function RunDetail() {
 
       {/* Events */}
       {run.events && run.events.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium text-zinc-700 mb-4">Events</h2>
-          <div className="space-y-2">
+        <div className={styles.mb6}>
+          <h2 className={styles.sectionTitle}>Events</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {run.events.map((event, i) => (
-              <div
-                key={i}
-                className="bg-white rounded-xl border border-zinc-200 p-4 shadow-sm"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-zinc-900">
-                    {event.event_name}
-                  </span>
-                  <span className="text-xs text-zinc-400">
+              <div key={i} className={styles.eventCard}>
+                <div className={styles.eventHeader}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className={styles.eventName}>
+                      {event.event_name}
+                    </span>
+                    {"audience" in event.event_data &&
+                      event.event_data.audience != null && (
+                        <span className={styles.audienceBadge}>
+                          {String(event.event_data.audience)}
+                        </span>
+                      )}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: tokens.colorNeutralForeground4,
+                    }}
+                  >
                     {timeAgo(event.created_at)}
                   </span>
                 </div>
@@ -426,9 +726,9 @@ export function RunDetail() {
 
       {/* Result */}
       {run.result !== null && run.result !== undefined && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium text-zinc-700 mb-4">Result</h2>
-          <div className="bg-white rounded-xl border border-zinc-200 p-4 shadow-sm">
+        <div className={styles.mb6}>
+          <h2 className={styles.sectionTitle}>Result</h2>
+          <div className={styles.card}>
             <JsonView data={run.result} />
           </div>
         </div>

@@ -1,17 +1,51 @@
 import { useMemo } from "react";
+import { makeStyles, tokens } from "@fluentui/react-components";
+import { CopyButton } from "./CopyButton";
 
 interface JsonViewProps {
   data: unknown;
-  className?: string;
 }
 
 interface Token {
   text: string;
-  cls: string;
+  color: string;
 }
 
+const useStyles = makeStyles({
+  wrapper: {
+    position: "relative",
+    "&:hover button": {
+      opacity: 1,
+    },
+  },
+  pre: {
+    fontSize: "12px",
+    fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
+    backgroundColor: tokens.colorNeutralBackground3,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: "6px",
+    padding: "12px",
+    overflowX: "auto",
+    maxHeight: "320px",
+    margin: 0,
+  },
+  copyBtn: {
+    position: "absolute",
+    top: "8px",
+    right: "8px",
+    opacity: 0,
+    transitionProperty: "opacity",
+    transitionDuration: "0.15s",
+  },
+  null: {
+    color: tokens.colorNeutralForeground4,
+    fontStyle: "italic",
+    fontSize: "13px",
+  },
+});
+
 function tokenize(json: string): Token[] {
-  const tokens: Token[] = [];
+  const result: Token[] = [];
   const regex =
     /("(?:\\u[\dA-Fa-f]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g;
 
@@ -19,54 +53,57 @@ function tokenize(json: string): Token[] {
   let match;
 
   while ((match = regex.exec(json)) !== null) {
-    // Plain text before this token
     if (match.index > lastIndex) {
-      tokens.push({ text: json.slice(lastIndex, match.index), cls: "" });
+      result.push({ text: json.slice(lastIndex, match.index), color: "" });
     }
 
     const value = match[0];
-    let cls = "text-blue-600"; // number
+    let color = "#0078d4"; // number - blue
     if (value.startsWith('"')) {
-      cls = value.endsWith(":") ? "text-zinc-500" : "text-emerald-600";
+      color = value.endsWith(":") ? "#8a8886" : "#107c10"; // key: gray, string: green
     } else if (/^(?:true|false)$/.test(value)) {
-      cls = "text-amber-600";
+      color = "#ca5010"; // boolean: orange
     } else if (value === "null") {
-      cls = "text-zinc-400";
+      color = "#8a8886"; // null: gray
     }
 
-    tokens.push({ text: value, cls });
+    result.push({ text: value, color });
     lastIndex = regex.lastIndex;
   }
 
-  // Trailing plain text
   if (lastIndex < json.length) {
-    tokens.push({ text: json.slice(lastIndex), cls: "" });
+    result.push({ text: json.slice(lastIndex), color: "" });
   }
 
-  return tokens;
+  return result;
 }
 
-export function JsonView({ data, className }: JsonViewProps) {
+export function JsonView({ data }: JsonViewProps) {
+  const styles = useStyles();
+
   if (data === undefined || data === null) {
-    return <span className="text-zinc-400 text-sm italic">null</span>;
+    return <span className={styles.null}>null</span>;
   }
 
   const json = JSON.stringify(data, null, 2);
-  const tokens = useMemo(() => tokenize(json), [json]);
+  const jsonTokens = useMemo(() => tokenize(json), [json]);
 
   return (
-    <pre
-      className={`text-xs font-mono bg-zinc-50 border border-zinc-200 rounded-lg p-3 overflow-auto max-h-80 ${className ?? ""}`}
-    >
-      {tokens.map((t, i) =>
-        t.cls ? (
-          <span key={i} className={t.cls}>
-            {t.text}
-          </span>
-        ) : (
-          t.text
-        )
-      )}
-    </pre>
+    <div className={styles.wrapper}>
+      <pre className={styles.pre}>
+        {jsonTokens.map((t, i) =>
+          t.color ? (
+            <span key={i} style={{ color: t.color }}>
+              {t.text}
+            </span>
+          ) : (
+            t.text
+          ),
+        )}
+      </pre>
+      <div className={styles.copyBtn}>
+        <CopyButton text={json} label="Copy JSON" />
+      </div>
+    </div>
   );
 }

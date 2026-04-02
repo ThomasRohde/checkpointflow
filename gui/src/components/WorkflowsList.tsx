@@ -1,22 +1,28 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import {
-  ArrowDown,
-  ArrowUp,
-  FileCode2,
-  Folder,
-  Loader2,
-  Search,
-} from "lucide-react";
+  Input,
+  Button,
+  Spinner,
+  makeStyles,
+  tokens,
+} from "@fluentui/react-components";
+import {
+  ArrowSortUpRegular,
+  ArrowSortDownRegular,
+  SearchRegular,
+  FolderRegular,
+  DocumentRegular,
+} from "@fluentui/react-icons";
 import { api } from "../lib/api";
 import type { WorkflowFile } from "../lib/types";
+import { usePanelNavigation } from "../hooks/usePanelNavigation";
 
 type SortKey = "name" | "relative" | "source";
 type SortDir = "asc" | "desc";
 
 function groupBySource(
-  workflows: WorkflowFile[]
+  workflows: WorkflowFile[],
 ): Record<string, WorkflowFile[]> {
   const groups: Record<string, WorkflowFile[]> = {};
   for (const wf of workflows) {
@@ -32,8 +38,138 @@ const sourceLabels: Record<string, string> = {
   home: "Home Directory",
 };
 
+const useStyles = makeStyles({
+  root: {
+    padding: "24px",
+    maxWidth: "900px",
+    marginLeft: "auto",
+    marginRight: "auto",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "24px",
+  },
+  titleGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  title: {
+    fontSize: "18px",
+    fontWeight: 600,
+    color: tokens.colorNeutralForeground1,
+    margin: 0,
+  },
+  controls: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  sortButtons: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+  },
+  center: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "80px 0",
+  },
+  empty: {
+    textAlign: "center",
+    padding: "80px 0",
+    color: tokens.colorNeutralForeground4,
+  },
+  error: {
+    padding: "16px",
+    borderRadius: "8px",
+    border: `1px solid ${tokens.colorPaletteRedBorder2}`,
+    backgroundColor: tokens.colorPaletteRedBackground1,
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: "13px",
+  },
+  groupHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "12px",
+  },
+  groupTitle: {
+    fontSize: "13px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground3,
+    margin: 0,
+  },
+  group: {
+    marginBottom: "24px",
+  },
+  wfList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  wfButton: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    padding: "12px 16px",
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: "8px",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: "pointer",
+    textAlign: "left",
+    transitionProperty: "border-color",
+    transitionDuration: "0.15s",
+  },
+  wfContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  wfNameRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  wfName: {
+    fontSize: "13px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground1,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  wfVersion: {
+    fontSize: "10px",
+    color: tokens.colorNeutralForeground4,
+    fontFamily: "monospace",
+    flexShrink: 0,
+  },
+  wfDescription: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground3,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    marginTop: "2px",
+  },
+  wfPath: {
+    fontSize: "12px",
+    color: tokens.colorNeutralForeground4,
+    fontFamily: "monospace",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+});
+
 export function WorkflowsList() {
-  const navigate = useNavigate();
+  const { openWorkflowGraph } = usePanelNavigation();
+  const styles = useStyles();
+
   const {
     data: workflows,
     isLoading,
@@ -66,7 +202,7 @@ export function WorkflowsList() {
         (wf) =>
           wf.name.toLowerCase().includes(q) ||
           wf.relative.toLowerCase().includes(q) ||
-          wf.path.toLowerCase().includes(q)
+          wf.path.toLowerCase().includes(q),
       );
     }
     return [...result].sort((a, b) => {
@@ -80,44 +216,45 @@ export function WorkflowsList() {
   const groups = useMemo(() => groupBySource(filtered), [filtered]);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <FileCode2 className="w-5 h-5 text-zinc-400" />
-          <h1 className="text-lg font-semibold text-zinc-900">Workflows</h1>
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <div className={styles.titleGroup}>
+          <DocumentRegular style={{ width: 20, height: 20 }} />
+          <h1 className={styles.title}>Workflows</h1>
         </div>
         {workflows && workflows.length > 0 && (
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-              <input
-                type="text"
-                placeholder="Search workflows..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 pr-3 py-1.5 text-sm rounded-lg border border-zinc-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-300 w-56 transition-colors"
-              />
-            </div>
-            <div className="flex items-center gap-1 text-xs text-zinc-500">
+          <div className={styles.controls}>
+            <Input
+              contentBefore={<SearchRegular />}
+              placeholder="Search workflows..."
+              value={search}
+              onChange={(_, data) => setSearch(data.value)}
+              size="small"
+              style={{ width: 220 }}
+            />
+            <div className={styles.sortButtons}>
               {(["name", "path"] as const).map((key) => {
                 const k: SortKey = key === "path" ? "relative" : key;
                 const active = sortKey === k;
                 return (
-                  <button
+                  <Button
                     key={key}
+                    appearance={active ? "primary" : "subtle"}
+                    size="small"
                     onClick={() => handleSort(k)}
-                    className={`px-2 py-1 rounded transition-colors ${active ? "bg-zinc-200 text-zinc-700" : "hover:bg-zinc-100"}`}
-                  >
-                    <span className="inline-flex items-center gap-0.5">
-                      {key === "path" ? "Path" : "Name"}
-                      {active &&
-                        (sortDir === "asc" ? (
-                          <ArrowUp className="w-3 h-3" />
+                    icon={
+                      active ? (
+                        sortDir === "asc" ? (
+                          <ArrowSortUpRegular />
                         ) : (
-                          <ArrowDown className="w-3 h-3" />
-                        ))}
-                    </span>
-                  </button>
+                          <ArrowSortDownRegular />
+                        )
+                      ) : undefined
+                    }
+                    iconPosition="after"
+                  >
+                    {key === "path" ? "Path" : "Name"}
+                  </Button>
                 );
               })}
             </div>
@@ -126,60 +263,72 @@ export function WorkflowsList() {
       </div>
 
       {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
+        <div className={styles.center}>
+          <Spinner size="medium" />
         </div>
       )}
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className={styles.error}>
           Failed to load workflows: {(error as Error).message}
         </div>
       )}
 
       {workflows && workflows.length === 0 && (
-        <div className="text-center py-20 text-zinc-400">
-          <FileCode2 className="w-10 h-10 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">No workflows found</p>
+        <div className={styles.empty}>
+          <DocumentRegular
+            style={{ width: 40, height: 40, opacity: 0.4, margin: "0 auto 12px", display: "block" }}
+          />
+          <p>No workflows found</p>
         </div>
       )}
 
       {workflows && workflows.length > 0 && filtered.length === 0 && (
-        <div className="text-center py-20 text-zinc-400">
-          <Search className="w-10 h-10 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">No workflows match "{search}"</p>
+        <div className={styles.empty}>
+          <SearchRegular
+            style={{ width: 40, height: 40, opacity: 0.4, margin: "0 auto 12px", display: "block" }}
+          />
+          <p>No workflows match &quot;{search}&quot;</p>
         </div>
       )}
 
       {filtered.length > 0 && (
-        <div className="space-y-6">
+        <div>
           {Object.entries(groups).map(([source, files]) => (
-            <div key={source}>
-              <div className="flex items-center gap-2 mb-3">
-                <Folder className="w-4 h-4 text-zinc-400" />
-                <h2 className="text-sm font-medium text-zinc-500">
+            <div key={source} className={styles.group}>
+              <div className={styles.groupHeader}>
+                <FolderRegular
+                  style={{ width: 16, height: 16, color: tokens.colorNeutralForeground4 }}
+                />
+                <h2 className={styles.groupTitle}>
                   {sourceLabels[source] ?? source}
                 </h2>
               </div>
-              <div className="space-y-1">
+              <div className={styles.wfList}>
                 {files.map((wf) => (
                   <button
                     key={wf.path}
-                    onClick={() =>
-                      navigate(
-                        `/workflows/view?path=${encodeURIComponent(wf.path)}`
-                      )
-                    }
-                    className="w-full flex items-center gap-3 px-4 py-3 bg-white rounded-lg border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all text-left group"
+                    className={styles.wfButton}
+                    onClick={() => openWorkflowGraph(wf.path, wf.name)}
                   >
-                    <FileCode2 className="w-4 h-4 text-zinc-400 group-hover:text-blue-500 transition-colors" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-zinc-900 truncate">
-                        {wf.name}
+                    <DocumentRegular
+                      style={{ width: 16, height: 16, flexShrink: 0 }}
+                    />
+                    <div className={styles.wfContent}>
+                      <div className={styles.wfNameRow}>
+                        <span className={styles.wfName}>{wf.name}</span>
+                        {wf.version && (
+                          <span className={styles.wfVersion}>
+                            v{wf.version}
+                          </span>
+                        )}
                       </div>
-                      <div className="text-xs text-zinc-400 font-mono truncate">
-                        {wf.relative}
-                      </div>
+                      {wf.description && (
+                        <div className={styles.wfDescription}>
+                          {wf.description}
+                        </div>
+                      )}
+                      <div className={styles.wfPath}>{wf.relative}</div>
                     </div>
                   </button>
                 ))}

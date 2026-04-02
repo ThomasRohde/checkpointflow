@@ -12,7 +12,7 @@ import {
   Workflow,
 } from "lucide-react";
 import type { WorkflowStep } from "../lib/types";
-import { cn, truncate } from "../lib/utils";
+import { truncate } from "../lib/utils";
 
 export type StepNodeData = {
   step: WorkflowStep;
@@ -28,73 +28,73 @@ const kindConfig: Record<
     bg: string;
     border: string;
     text: string;
-    shape: string;
+    radius: string;
   }
 > = {
   cli: {
     icon: Terminal,
-    bg: "bg-blue-50",
-    border: "border-blue-300",
-    text: "text-blue-800",
-    shape: "rounded-lg",
+    bg: "#eff6ff",
+    border: "#93c5fd",
+    text: "#1e40af",
+    radius: "8px",
   },
   await_event: {
     icon: Pause,
-    bg: "bg-amber-50",
-    border: "border-amber-300",
-    text: "text-amber-800",
-    shape: "rounded-xl",
+    bg: "#fffbeb",
+    border: "#fcd34d",
+    text: "#92400e",
+    radius: "12px",
   },
   end: {
     icon: Flag,
-    bg: "bg-emerald-50",
-    border: "border-emerald-300",
-    text: "text-emerald-800",
-    shape: "rounded-full",
+    bg: "#ecfdf5",
+    border: "#6ee7b7",
+    text: "#065f46",
+    radius: "9999px",
   },
   switch: {
     icon: GitBranch,
-    bg: "bg-violet-50",
-    border: "border-violet-300",
-    text: "text-violet-800",
-    shape: "rounded-lg",
+    bg: "#f5f3ff",
+    border: "#c4b5fd",
+    text: "#5b21b6",
+    radius: "8px",
   },
   api: {
     icon: Globe,
-    bg: "bg-cyan-50",
-    border: "border-cyan-300",
-    text: "text-cyan-800",
-    shape: "rounded-lg",
+    bg: "#ecfeff",
+    border: "#67e8f9",
+    text: "#155e75",
+    radius: "8px",
   },
   foreach: {
     icon: Repeat,
-    bg: "bg-rose-50",
-    border: "border-rose-300",
-    text: "text-rose-800",
-    shape: "rounded-lg",
+    bg: "#fff1f2",
+    border: "#fda4af",
+    text: "#9f1239",
+    radius: "8px",
   },
   parallel: {
     icon: Columns3,
-    bg: "bg-indigo-50",
-    border: "border-indigo-300",
-    text: "text-indigo-800",
-    shape: "rounded-lg",
+    bg: "#eef2ff",
+    border: "#a5b4fc",
+    text: "#3730a3",
+    radius: "8px",
   },
   workflow: {
     icon: Workflow,
-    bg: "bg-teal-50",
-    border: "border-teal-300",
-    text: "text-teal-800",
-    shape: "rounded-lg",
+    bg: "#f0fdfa",
+    border: "#5eead4",
+    text: "#134e4a",
+    radius: "8px",
   },
 };
 
 const defaultConfig = {
   icon: Circle,
-  bg: "bg-zinc-50",
-  border: "border-zinc-300",
-  text: "text-zinc-700",
-  shape: "rounded-lg",
+  bg: "#fafafa",
+  border: "#d4d4d8",
+  text: "#52525b",
+  radius: "8px",
 };
 
 function StepNodeComponent({ data }: NodeProps<StepNodeType>) {
@@ -127,37 +127,113 @@ function StepNodeComponent({ data }: NodeProps<StepNodeType>) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-zinc-300 !w-2 !h-2 !border-0" />
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{
+          background: "#d4d4d8",
+          width: 8,
+          height: 8,
+          border: "none",
+        }}
+      />
       <div
-        className={cn(
-          "border-2 px-4 py-3 shadow-sm transition-shadow",
-          config.bg,
-          config.border,
-          config.shape,
-          isEnd ? "min-w-[80px] text-center" : "min-w-[180px] max-w-[260px]",
-          data.selected && "ring-2 ring-blue-500 ring-offset-2"
-        )}
+        style={{
+          borderWidth: 2,
+          borderStyle: "solid",
+          borderColor: config.border,
+          backgroundColor: config.bg,
+          borderRadius: config.radius,
+          padding: "12px 16px",
+          boxShadow: data.selected
+            ? "0 0 0 3px #2563eb, 0 0 0 5px rgba(37,99,235,0.2)"
+            : "0 1px 2px rgba(0,0,0,0.05)",
+          minWidth: isEnd ? 80 : 180,
+          maxWidth: 260,
+          textAlign: isEnd ? "center" : "left",
+        }}
       >
-        <div className="flex items-center gap-2">
-          <Icon className={cn("w-4 h-4 shrink-0", config.text)} />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <Icon
+            style={{
+              width: 16,
+              height: 16,
+              flexShrink: 0,
+              color: config.text,
+            }}
+          />
           <span
-            className={cn("text-sm font-semibold truncate", config.text)}
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: config.text,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
           >
             {step.name || step.id}
           </span>
+          <span
+            style={{
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              opacity: 0.6,
+              fontWeight: 500,
+              flexShrink: 0,
+            }}
+          >
+            {step.kind}
+          </span>
         </div>
         {subtitle && (
-          <div className="text-xs text-zinc-500 mt-1 font-mono truncate">
+          <div
+            style={{
+              fontSize: 11,
+              color: "#71717a",
+              marginTop: 4,
+              fontFamily: "monospace",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {subtitle}
           </div>
         )}
         {step.if && (
-          <div className="text-[10px] italic text-zinc-400 mt-1 truncate">
+          <div
+            style={{
+              fontSize: 10,
+              fontStyle: "italic",
+              color: "#a1a1aa",
+              marginTop: 4,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             if: {step.if}
           </div>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-zinc-300 !w-2 !h-2 !border-0" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{
+          background: "#d4d4d8",
+          width: 8,
+          height: 8,
+          border: "none",
+        }}
+      />
     </>
   );
 }
